@@ -946,6 +946,45 @@
                 }
             });
         })();
+
+        (() => {
+            const wrap = document.querySelector('.oc-nav-wrap');
+
+            if (!wrap) {
+                return;
+            }
+
+            const menus = Array.from(wrap.querySelectorAll('.oc-account-menu, [data-location-widget]'));
+
+            const syncHeaderMenuState = () => {
+                document.body.classList.toggle('oc-header-menu-open', menus.some((menu) => menu.open));
+            };
+
+            menus.forEach((menu) => {
+                menu.addEventListener('toggle', () => {
+                    if (menu.open) {
+                        menus.forEach((other) => {
+                            if (other !== menu && other.open) {
+                                other.removeAttribute('open');
+                            }
+                        });
+                    }
+
+                    syncHeaderMenuState();
+                });
+            });
+
+            document.addEventListener('click', (event) => {
+                const target = event.target;
+
+                if (!(target instanceof Element) || wrap.contains(target)) {
+                    return;
+                }
+
+                menus.forEach((menu) => menu.removeAttribute('open'));
+                syncHeaderMenuState();
+            });
+        })();
     </script>
     <x-impersonate::banner />
 </body>
