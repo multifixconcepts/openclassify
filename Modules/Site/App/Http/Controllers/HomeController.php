@@ -1,15 +1,18 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Modules\Site\App\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use Illuminate\Contracts\View\View;
 use Modules\Category\Models\Category;
 use Modules\Listing\Models\Listing;
 use Modules\User\App\Models\User;
 
 class HomeController extends Controller
 {
-    public function index()
+    public function index(): View
     {
         $categories = Category::homeParentCategories();
         $featuredListings = Listing::homeFeatured();

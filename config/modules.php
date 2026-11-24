@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Nwidart\Modules\Activators\FileActivator;
 use Nwidart\Modules\Providers\ConsoleServiceProvider;
 
@@ -85,14 +87,13 @@ return [
             'component-view' => ['path' => 'resources/views/components', 'generate' => false],
             'views' => ['path' => 'resources/views', 'generate' => true],
             'routes' => ['path' => 'routes', 'generate' => true],
-            'test-feature' => ['path' => 'tests/Feature', 'generate' => true],
-            'test-unit' => ['path' => 'tests/Unit', 'generate' => true],
+            'test-feature' => ['path' => 'tests/Feature', 'generate' => false],
+            'test-unit' => ['path' => 'tests/Unit', 'generate' => false],
         ],
     ],
     'auto-discover' => [
         'migrations' => true,
         'translations' => false,
-
     ],
     'commands' => ConsoleServiceProvider::defaultCommands()
         ->merge([

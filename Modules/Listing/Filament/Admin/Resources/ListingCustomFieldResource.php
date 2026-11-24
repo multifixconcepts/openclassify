@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Modules\Listing\Filament\Admin\Resources;
 
 use BackedEnum;
@@ -9,11 +11,16 @@ use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Modules\Admin\Support\Filament\ResourceTableActions;
+use Modules\Admin\Support\Filament\ResourceTableFilters;
 use Modules\Category\Models\Category;
 use Modules\Listing\Filament\Admin\Resources\ListingCustomFieldResource\Pages;
 use Modules\Listing\Models\ListingCustomField;
@@ -36,7 +43,7 @@ class ListingCustomFieldResource extends Resource
                 ->required()
                 ->maxLength(255)
                 ->live(onBlur: true)
-                ->afterStateUpdated(function ($state, $set, ?ListingCustomField $record): void {
+                ->afterStateUpdated(function (mixed $state, Set $set, ?ListingCustomField $record): void {
                     $set('name', ListingCustomField::uniqueNameFromLabel((string) $state, $record));
                 }),
             TextInput::make('name')
@@ -59,7 +66,7 @@ class ListingCustomFieldResource extends Resource
             TagsInput::make('options')
                 ->label('Select Options')
                 ->placeholder('Add an option and press Enter')
-                ->visible(fn ($get): bool => $get('type') === ListingCustomField::TYPE_SELECT)
+                ->visible(fn (Get $get): bool => $get('type') === ListingCustomField::TYPE_SELECT)
                 ->helperText('Used only for Select type fields.'),
             TextInput::make('sort_order')
                 ->numeric()
@@ -78,7 +85,7 @@ class ListingCustomFieldResource extends Resource
 
     public static function table(Table $table): Table
     {
-        return $table
+        return ResourceTableFilters::layout($table
             ->columns([
                 TextColumn::make('id')->sortable(),
                 TextColumn::make('label')->searchable()->sortable(),
@@ -89,7 +96,13 @@ class ListingCustomFieldResource extends Resource
                 IconColumn::make('is_active')->boolean()->label('Active'),
                 TextColumn::make('sort_order')->sortable(),
             ])
-            ->defaultSort('id', 'desc')
+            ->defaultSort('id', 'desc'), [
+                ResourceTableFilters::options('type', ListingCustomField::typeOptions(), 'Type'),
+                SelectFilter::make('category_id')->label('Category')->relationship('category', 'name')->searchable()->preload(),
+                TernaryFilter::make('is_required')->label('Required'),
+                TernaryFilter::make('is_active')->label('Active'),
+                ResourceTableFilters::dateRange(),
+            ])
             ->actions(ResourceTableActions::editDelete());
     }
 

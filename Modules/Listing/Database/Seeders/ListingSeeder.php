@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Modules\Listing\Database\Seeders;
 
 use Illuminate\Database\Seeder;
@@ -25,6 +27,8 @@ class ListingSeeder extends Seeder
         'Well kept',
     ];
 
+    private const MAX_DEMO_LISTINGS = 120;
+
     public function run(): void
     {
         $users = $this->resolveSeederUsers();
@@ -42,8 +46,8 @@ class ListingSeeder extends Seeder
 
         foreach ($categories as $category) {
             foreach ($users as $user) {
-                if ($assignedImageIndex >= $imagePool->count()) {
-                    continue;
+                if ($assignedImageIndex >= self::MAX_DEMO_LISTINGS) {
+                    break 2;
                 }
 
                 $listingData = $this->buildListingData(
@@ -52,7 +56,7 @@ class ListingSeeder extends Seeder
                     $countries,
                     $turkeyCities,
                     $user,
-                    $imagePool->get($assignedImageIndex)
+                    $imagePool->get($assignedImageIndex % $imagePool->count())
                 );
                 $listing = $this->upsertListing($listingData, $category, $user);
                 $plannedSlugs[] = $listing->slug;
@@ -128,7 +132,7 @@ class ListingSeeder extends Seeder
             ->where('is_active', true)
             ->orderBy('name')
             ->pluck('name')
-            ->map(fn ($name): string => trim((string) $name))
+            ->map(fn (mixed $name): string => trim((string) $name))
             ->filter(fn (string $name): bool => $name !== '')
             ->values();
 
@@ -166,13 +170,13 @@ class ListingSeeder extends Seeder
 
     private function resolveLocation(int $index, Collection $countries, Collection $turkeyCities): array
     {
-        $turkeyCountry = $countries->first(fn ($country): bool => strtoupper((string) $country->code) === 'TR');
+        $turkeyCountry = $countries->first(fn (mixed $country): bool => strtoupper((string) $country->code) === 'TR');
         $turkeyName = trim((string) ($turkeyCountry->name ?? 'Turkey')) ?: 'Turkey';
         $useForeignCountry = $countries->count() > 1 && $index % 4 === 0;
 
         if ($useForeignCountry) {
             $foreignCountries = $countries
-                ->filter(fn ($country): bool => strtoupper((string) $country->code) !== 'TR')
+                ->filter(fn (mixed $country): bool => strtoupper((string) $country->code) !== 'TR')
                 ->values();
 
             if ($foreignCountries->isNotEmpty()) {

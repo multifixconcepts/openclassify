@@ -1,9 +1,11 @@
 <?php
 
+declare(strict_types=1);
+
 use Illuminate\Support\Facades\Route;
 use Modules\Panel\App\Http\Controllers\PanelController;
 
-Route::middleware(['web', 'auth'])->prefix('panel')->name('panel.')->group(function () {
+Route::middleware(['web', 'auth'])->prefix('panel')->name('panel.')->group(function (): void {
     Route::get('/', [PanelController::class, 'index'])->name('index');
     Route::get('/my-listings', [PanelController::class, 'listings'])->name('listings.index');
     Route::get('/create-listing', [PanelController::class, 'create'])->name('listings.create');

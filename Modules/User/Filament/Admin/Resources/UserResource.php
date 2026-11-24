@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Modules\User\Filament\Admin\Resources;
 
 use A909M\FilamentStateFusion\Tables\Columns\StateFusionSelectColumn;
@@ -8,12 +10,16 @@ use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
+use Livewire\Component;
 use Modules\Admin\Support\Filament\ResourceTableActions;
 use Modules\Admin\Support\Filament\ResourceTableColumns;
-use Modules\User\Filament\Admin\Resources\UserResource\Pages;
+use Modules\Admin\Support\Filament\ResourceTableFilters;
 use Modules\User\App\Models\User;
 use Modules\User\App\Support\Filament\UserFormFields;
+use Modules\User\Filament\Admin\Resources\UserResource\Pages;
 use STS\FilamentImpersonate\Actions\Impersonate;
 use UnitEnum;
 
@@ -30,7 +36,7 @@ class UserResource extends Resource
         return $schema->schema([
             UserFormFields::name(),
             UserFormFields::email(),
-            UserFormFields::password(fn ($livewire) => $livewire instanceof Pages\CreateUser),
+            UserFormFields::password(fn (Component $livewire): bool => $livewire instanceof Pages\CreateUser),
             UserFormFields::status(),
             UserFormFields::roles(),
         ]);
@@ -38,15 +44,18 @@ class UserResource extends Resource
 
     public static function table(Table $table): Table
     {
-        return $table->columns([
+        return ResourceTableFilters::layout($table->columns([
             ResourceTableColumns::id(),
             TextColumn::make('name')->searchable()->sortable(),
             TextColumn::make('email')->searchable()->sortable(),
             TextColumn::make('roles.name')->badge()->label('Roles'),
             StateFusionSelectColumn::make('status'),
             TextColumn::make('created_at')->dateTime()->sortable(),
-        ])->defaultSort('id', 'desc')->filters([
+        ])->defaultSort('id', 'desc'), [
             StateFusionSelectFilter::make('status'),
+            ResourceTableFilters::dateRange(),
+            TernaryFilter::make('email_verified_at')->label('Email verified')->nullable(),
+            SelectFilter::make('roles')->relationship('roles', 'name')->multiple()->preload(),
         ])->actions(ResourceTableActions::editActivityDelete(static::class, [
             Impersonate::make(),
         ]));

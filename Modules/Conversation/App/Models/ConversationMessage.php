@@ -1,26 +1,30 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Modules\Conversation\App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Modules\User\App\Models\User;
 
 class ConversationMessage extends Model
 {
-    use HasFactory;
+    use HasFactory, SoftDeletes;
 
     protected $fillable = ['conversation_id', 'sender_id', 'body', 'read_at'];
 
     protected $casts = ['read_at' => 'datetime'];
 
-    public function conversation()
+    public function conversation(): BelongsTo
     {
         return $this->belongsTo(Conversation::class);
     }
 
-    public function sender()
+    public function sender(): BelongsTo
     {
         return $this->belongsTo(User::class, 'sender_id');
     }

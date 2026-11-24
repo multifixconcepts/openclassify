@@ -1,11 +1,14 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Modules\Site\App\Providers;
 
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 use Modules\Site\App\Support\LocalMedia;
 use Modules\Site\App\Support\ScopedMediaPathGenerator;
+use Modules\Site\App\View\SiteLayoutComposer;
 
 class SiteServiceProvider extends ServiceProvider
 {
@@ -24,11 +27,10 @@ class SiteServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        $viewPath = module_path('Site', 'resources/views');
-
         $this->loadMigrationsFrom(module_path('Site', 'Database/migrations'));
         $this->loadRoutesFrom(module_path('Site', 'routes/web.php'));
-        $this->loadViewsFrom($viewPath, 'site');
-        View::addNamespace('app', $viewPath);
+        $this->loadViewsFrom(module_path('Site', 'resources/views'), 'site');
+        $this->loadTranslationsFrom(module_path('Site', 'lang'), 'site');
+        View::composer('site::layouts.app', SiteLayoutComposer::class);
     }
 }

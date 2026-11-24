@@ -1,17 +1,25 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Modules\Listing\Models;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Modules\Category\Models\Category;
 use Modules\Conversation\App\Models\Conversation;
+use Modules\Favorite\App\Models\FavoriteListing;
 use Modules\Listing\States\ActiveListingStatus;
 use Modules\Listing\States\ExpiredListingStatus;
 use Modules\Listing\States\ListingStatus;
@@ -21,10 +29,9 @@ use Modules\Listing\Support\ListingImageViewData;
 use Modules\Listing\Support\ListingPanelHelper;
 use Modules\Site\App\Support\LocalMedia;
 use Modules\User\App\Models\User;
-use Modules\Video\Enums\VideoStatus;
 use Modules\Video\Models\Video;
-use Spatie\Activitylog\LogOptions;
-use Spatie\Activitylog\Traits\LogsActivity;
+use Spatie\Activitylog\Models\Concerns\LogsActivity;
+use Spatie\Activitylog\Support\LogOptions;
 use Spatie\Image\Enums\Fit;
 use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
@@ -34,7 +41,7 @@ use Throwable;
 
 class Listing extends Model implements HasMedia
 {
-    use HasFactory, HasStates, InteractsWithMedia, LogsActivity;
+    use HasFactory, HasStates, InteractsWithMedia, LogsActivity, SoftDeletes;
 
     private const DEFAULT_PANEL_EXPIRY_WINDOW_DAYS = 30;
 
@@ -42,7 +49,7 @@ class Listing extends Model implements HasMedia
         'title', 'description', 'price', 'currency', 'category_id',
         'images', 'custom_fields',
         'contact_phone', 'contact_email', 'expires_at',
-        'city', 'country', 'latitude', 'longitude', 'location', 'view_count',
+        'city', 'country', 'latitude', 'longitude', 'location',
     ];
 
     protected $casts = [
@@ -64,31 +71,25 @@ class Listing extends Model implements HasMedia
         return LogOptions::defaults()
             ->logFillable()
             ->logOnlyDirty()
-            ->dontSubmitEmptyLogs();
+            ->dontLogEmptyChanges();
     }
 
-    public function category()
+    public function category(): BelongsTo
     {
         return $this->belongsTo(Category::class);
     }
 
-    public function user()
+    public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
     }
 
-    public function favoritedByUsers()
-    {
-        return $this->belongsToMany(User::class, 'favorite_listings')
-            ->withTimestamps();
-    }
-
-    public function conversations()
+    public function conversations(): HasMany
     {
         return $this->hasMany(Conversation::class);
     }
 
-    public function videos()
+    public function videos(): HasMany
     {
         return $this->hasMany(Video::class)->ordered();
     }
@@ -98,7 +99,7 @@ class Listing extends Model implements HasMedia
         return $query
             ->active()
             ->orderByDesc('is_featured')
-            ->orderByDesc('created_at');
+            ->orderByDesc('created_at')->orderByDesc('id');
     }
 
     public function scopeActive(Builder $query): Builder
@@ -109,6 +110,101 @@ class Listing extends Model implements HasMedia
     public function scopeOwnedByUser(Builder $query, int|string|null $userId): Builder
     {
         return $query->where('user_id', $userId);
+    }
+
+    public static function summariesByIds(array $ids): EloquentCollection
+    {
+        return static::query()
+            ->whereIn('id', $ids)
+            ->with('media')->get(['id', 'title', 'slug', 'price', 'currency', 'user_id', 'status', 'images']);
+    }
+
+    public static function activeCountsForUsers(array $userIds): array
+    {
+        return static::query()->active()->whereIn('user_id', $userIds)
+            ->selectRaw('user_id, COUNT(*) as aggregate')->groupBy('user_id')
+            ->pluck('aggregate', 'user_id')->map(static fn (mixed $count): int => (int) $count)->all();
+    }
+
+    public static function setFeatured(array $ids, bool $featured): void
+    {
+        if ($ids === []) {
+            return;
+        }
+
+        static::query()->whereIn('id', $ids)->update(['is_featured' => $featured]);
+    }
+
+    public static function expireOutdated(): int
+    {
+        return static::query()
+            ->active()
+            ->whereNotNull('expires_at')
+            ->where('expires_at', '<', now())
+            ->update(['status' => 'expired']);
+    }
+
+    public static function sellerIdOf(int $id): ?int
+    {
+        $value = static::query()->whereKey($id)->value('user_id');
+
+        return $value === null ? null : (int) $value;
+    }
+
+    public static function titleOf(int $id): string
+    {
+        return (string) static::query()->whereKey($id)->value('title');
+    }
+
+    public static function existsById(int $id): bool
+    {
+        return static::query()->whereKey($id)->exists();
+    }
+
+    public static function countForUser(int $userId): int
+    {
+        return static::query()->ownedByUser($userId)->count();
+    }
+
+    public static function activeCountForUser(int $userId): int
+    {
+        return static::query()->ownedByUser($userId)->active()->count();
+    }
+
+    public static function totalViewsForUser(int $userId): int
+    {
+        return (int) static::query()->ownedByUser($userId)->sum('view_count');
+    }
+
+    public static function recentForUser(int $userId, int $limit = 5): EloquentCollection
+    {
+        return static::query()->with(['category:id,name', 'media'])->ownedByUser($userId)->latest('id')->limit($limit)->get();
+    }
+
+    public static function paginatePublicForSeller(int $sellerId, int $perPage = 12): LengthAwarePaginator
+    {
+        return static::query()->with(['category:id,name', 'media'])
+            ->publicFeed()
+            ->ownedByUser($sellerId)
+            ->paginate($perPage)
+            ->withQueryString();
+    }
+
+    public static function browse(array $filters, ?array $categoryIds, string $sort, int $perPage = 16): array
+    {
+        $query = static::query()
+            ->active()
+            ->with(['category:id,name', 'media'])
+            ->forBrowseFilters([...$filters, 'category_ids' => $categoryIds])
+            ->applyBrowseSort($sort);
+
+        $listings = $query->paginate($perPage)->withQueryString();
+
+        return [
+            'allTotal' => $categoryIds === null ? $listings->total() : static::query()->active()->forBrowseFilters($filters)->count(),
+            'filteredTotal' => $listings->total(),
+            'listings' => $listings,
+        ];
     }
 
     public function scopeForPanelStatus(Builder $query, string $status): Builder
@@ -129,29 +225,16 @@ class Listing extends Model implements HasMedia
 
         return $query->where(function (Builder $searchQuery) use ($search): void {
             $searchQuery
-                ->where('title', 'like', "%{$search}%")
-                ->orWhere('description', 'like', "%{$search}%")
-                ->orWhere('city', 'like', "%{$search}%")
-                ->orWhere('country', 'like', "%{$search}%");
+                ->where('title', 'ilike', "%{$search}%")
+                ->orWhere('description', 'ilike', "%{$search}%")
+                ->orWhere('city', 'ilike', "%{$search}%")
+                ->orWhere('country', 'ilike', "%{$search}%");
         });
     }
 
     public function scopeWithPanelIndexState(Builder $query): Builder
     {
-        return $query
-            ->with('category:id,name')
-            ->withCount('favoritedByUsers')
-            ->withCount('videos')
-            ->withCount([
-                'videos as ready_videos_count' => fn (Builder $videoQuery): Builder => $videoQuery
-                    ->whereNotNull('path')
-                    ->where('is_active', true),
-                'videos as pending_videos_count' => fn (Builder $videoQuery): Builder => $videoQuery
-                    ->whereIn('status', [
-                        VideoStatus::Pending->value,
-                        VideoStatus::Processing->value,
-                    ]),
-            ]);
+        return $query->with(['category:id,name', 'media']);
     }
 
     public function scopeForCategory(Builder $query, ?int $categoryId): Builder
@@ -186,11 +269,11 @@ class Listing extends Model implements HasMedia
         $query
             ->searchTerm($search)
             ->forCategoryIds(is_array($categoryIds) ? $categoryIds : null)
-            ->when(! is_null($userId) && $userId > 0, fn (Builder $builder) => $builder->where('user_id', $userId))
-            ->when($country !== null && $country !== '', fn (Builder $builder) => $builder->where('country', $country))
-            ->when($city !== null && $city !== '', fn (Builder $builder) => $builder->where('city', $city))
-            ->when(! is_null($minPrice), fn (Builder $builder) => $builder->whereNotNull('price')->where('price', '>=', $minPrice))
-            ->when(! is_null($maxPrice), fn (Builder $builder) => $builder->whereNotNull('price')->where('price', '<=', $maxPrice));
+            ->when(! is_null($userId) && $userId > 0, fn (Builder $builder): Builder => $builder->where('user_id', $userId))
+            ->when($country !== null && $country !== '', fn (Builder $builder): Builder => $builder->where('country', $country))
+            ->when($city !== null && $city !== '', fn (Builder $builder): Builder => $builder->where('city', $city))
+            ->when(! is_null($minPrice), fn (Builder $builder): Builder => $builder->whereNotNull('price')->where('price', '>=', $minPrice))
+            ->when(! is_null($maxPrice), fn (Builder $builder): Builder => $builder->whereNotNull('price')->where('price', '<=', $maxPrice));
 
         return match ($dateFilter) {
             'today' => $query->where('created_at', '>=', Carbon::now()->startOfDay()),
@@ -203,21 +286,12 @@ class Listing extends Model implements HasMedia
     public function scopeApplyBrowseSort(Builder $query, string $sort): Builder
     {
         return match ($sort) {
-            'newest' => $query->reorder()->orderByDesc('created_at'),
-            'oldest' => $query->reorder()->orderBy('created_at'),
-            'price_asc' => $query->reorder()->orderByRaw('price is null')->orderBy('price'),
-            'price_desc' => $query->reorder()->orderByRaw('price is null')->orderByDesc('price'),
-            default => $query->reorder()->orderByDesc('is_featured')->orderByDesc('created_at'),
+            'newest' => $query->reorder()->orderByDesc('created_at')->orderByDesc('id'),
+            'oldest' => $query->reorder()->orderBy('created_at')->orderBy('id'),
+            'price_asc' => $query->reorder()->orderByRaw('price is null')->orderBy('price')->orderBy('id'),
+            'price_desc' => $query->reorder()->orderByRaw('price is null')->orderByDesc('price')->orderByDesc('id'),
+            default => $query->reorder()->orderByDesc('is_featured')->orderByDesc('created_at')->orderByDesc('id'),
         };
-    }
-
-    public function themeGallery(): array
-    {
-        return collect($this->galleryImageData())
-            ->map(fn (array $image): ?string => ListingImageViewData::pickUrl($image['gallery'] ?? null))
-            ->filter(fn (?string $url): bool => is_string($url) && $url !== '')
-            ->values()
-            ->all();
     }
 
     public function galleryImageData(): array
@@ -235,7 +309,7 @@ class Listing extends Model implements HasMedia
         }
 
         return collect($this->images ?? [])
-            ->filter(fn ($value): bool => is_string($value) && trim($value) !== '')
+            ->filter(fn (mixed $value): bool => is_string($value) && trim($value) !== '')
             ->map(fn (string $url): array => [
                 'gallery' => ListingImageViewData::fromUrl($url),
                 'thumb' => ListingImageViewData::fromUrl($url),
@@ -253,7 +327,7 @@ class Listing extends Model implements HasMedia
         }
 
         $fallback = collect($this->images ?? [])
-            ->first(fn ($value): bool => is_string($value) && trim($value) !== '');
+            ->first(fn (mixed $value): bool => is_string($value) && trim($value) !== '');
 
         return ListingImageViewData::fromUrl(is_string($fallback) ? $fallback : null);
     }
@@ -263,11 +337,23 @@ class Listing extends Model implements HasMedia
         return ListingImageViewData::pickUrl($this->primaryImageData($context), $viewport);
     }
 
+    public function loadDetail(): void
+    {
+        $this->loadMissing([
+            'user:id,name,email',
+            'category:id,name,parent_id,slug',
+            'category.parent:id,name,parent_id,slug',
+            'category.parent.parent:id,name,parent_id,slug',
+            'media',
+            'videos' => fn (HasMany $query): HasMany => $query->published()->ordered(),
+        ]);
+    }
+
     public function relatedSuggestions(int $limit = 8): Collection
     {
         $baseQuery = static::query()
             ->publicFeed()
-            ->with(['category:id,name', 'videos'])
+            ->with(['category:id,name', 'videos', 'media'])
             ->whereKeyNot($this->getKey());
 
         $primary = (clone $baseQuery)
@@ -289,14 +375,17 @@ class Listing extends Model implements HasMedia
         return $primary->concat($fallback)->values();
     }
 
-    public static function panelStatusOptions(): array
+    public function ownerStatusOptions(): array
     {
-        return [
-            'pending' => 'Pending',
-            'active' => 'Active',
-            'sold' => 'Sold',
-            'expired' => 'Expired',
-        ];
+        $statuses = match ($this->statusValue()) {
+            'pending' => ['pending'],
+            'expired' => ['expired', 'sold'],
+            default => ['active', 'sold'],
+        };
+
+        return collect($statuses)
+            ->mapWithKeys(fn (string $status): array => [$status => __('listing::messages.status_'.($status === 'active' ? 'live' : $status))])
+            ->all();
     }
 
     public static function panelStatusCountsForUser(int|string $userId): array
@@ -373,7 +462,7 @@ class Listing extends Model implements HasMedia
 
     public static function homeFeatured(int $limit = 4): Collection
     {
-        return static::query()
+        return static::query()->with(['category:id,name', 'media'])
             ->active()
             ->where('is_featured', true)
             ->latest()
@@ -383,7 +472,7 @@ class Listing extends Model implements HasMedia
 
     public static function homeRecent(int $limit = 8): Collection
     {
-        return static::query()
+        return static::query()->with(['category:id,name', 'media'])
             ->active()
             ->latest()
             ->take($limit)
@@ -401,6 +490,14 @@ class Listing extends Model implements HasMedia
             ->paginate(10)
             ->withQueryString();
 
+        $favoriteCounts = FavoriteListing::countsForListings(
+            $listings->getCollection()->map(static fn (self $listing): int => (int) $listing->getKey())->all()
+        );
+
+        $listings->getCollection()->each(static function (self $listing) use ($favoriteCounts): void {
+            $listing->setAttribute('favorited_by_users_count', $favoriteCounts[(int) $listing->getKey()] ?? 0);
+        });
+
         return [
             'listings' => $listings,
             'counts' => static::panelStatusCountsForUser($user->getKey()),
@@ -415,7 +512,7 @@ class Listing extends Model implements HasMedia
     public function panelPriceLabel(): string
     {
         if (is_null($this->price)) {
-            return 'Free';
+            return __('listing::messages.free');
         }
 
         return number_format((float) $this->price, 2, ',', '.').' '.($this->currency ?? 'TL');
@@ -425,24 +522,24 @@ class Listing extends Model implements HasMedia
     {
         return match ($this->statusValue()) {
             'sold' => [
-                'label' => 'Sold',
+                'label' => __('listing::messages.status_sold'),
                 'badge_class' => 'is-success',
-                'hint' => 'This listing is marked as sold.',
+                'hint' => __('listing::messages.hint_sold'),
             ],
             'expired' => [
-                'label' => 'Expired',
+                'label' => __('listing::messages.status_expired'),
                 'badge_class' => 'is-danger',
-                'hint' => 'This listing is waiting to be republished.',
+                'hint' => __('listing::messages.hint_expired'),
             ],
             'pending' => [
-                'label' => 'Pending review',
+                'label' => __('listing::messages.status_pending'),
                 'badge_class' => 'is-warning',
-                'hint' => 'Waiting for moderation approval.',
+                'hint' => __('listing::messages.hint_pending'),
             ],
             default => [
-                'label' => 'Live',
+                'label' => __('listing::messages.status_live'),
                 'badge_class' => 'is-primary',
-                'hint' => 'Visible to visitors right now.',
+                'hint' => __('listing::messages.hint_live'),
             ],
         };
     }
@@ -454,51 +551,21 @@ class Listing extends Model implements HasMedia
             trim((string) $this->country),
         ])->filter()->values();
 
-        return $parts->isNotEmpty() ? $parts->implode(', ') : 'Location not specified';
-    }
-
-    public function panelPublishedAt(): ?Carbon
-    {
-        $createdAt = $this->created_at?->copy();
-        $expiresAt = $this->expires_at?->copy();
-
-        if (! $createdAt) {
-            return $expiresAt;
-        }
-
-        if (! $expiresAt || $expiresAt->greaterThanOrEqualTo($createdAt)) {
-            return $createdAt;
-        }
-
-        return $expiresAt->subDays(self::DEFAULT_PANEL_EXPIRY_WINDOW_DAYS);
+        return $parts->isNotEmpty() ? $parts->implode(', ') : __('listing::messages.location_not_specified');
     }
 
     public function panelExpirySummary(): string
     {
         if (! $this->expires_at) {
-            return 'No expiry limit';
+            return __('listing::messages.no_expiry');
         }
 
         $expiresAt = $this->expires_at->copy()->startOfDay();
-        $days = Carbon::today()->diffInDays($expiresAt, false);
+        $days = (int) Carbon::today()->diffInDays($expiresAt, false);
 
-        return match (true) {
-            $days > 0 => $days.' days left',
-            $days === 0 => 'Ends today',
-            default => 'Expired '.abs($days).' days ago',
-        };
-    }
-
-    public function panelVideoSummary(int $total, int $ready, int $pending): ?array
-    {
-        if ($total < 1) {
-            return null;
-        }
-
-        return [
-            'label' => $total.' videos',
-            'detail' => $ready.' ready'.($pending > 0 ? ', '.$pending.' processing' : ''),
-        ];
+        return $days >= 0
+            ? trans_choice('listing::messages.days_left', $days, ['count' => $days])
+            : trans_choice('listing::messages.expired_days_ago', abs($days), ['count' => abs($days)]);
     }
 
     public function replacePublicImage(string $absolutePath, ?string $fileName = null): void
@@ -559,12 +626,7 @@ class Listing extends Model implements HasMedia
 
     public function statusLabel(): string
     {
-        return match ($this->statusValue()) {
-            'sold' => 'Sold',
-            'expired' => 'Expired',
-            'pending' => 'Pending',
-            default => 'Active',
-        };
+        return $this->panelStatusMeta()['label'];
     }
 
     public function loadPanelEditor(): self
@@ -586,8 +648,13 @@ class Listing extends Model implements HasMedia
             return;
         }
 
-        $this->increment('view_count');
-        $this->refresh();
+        $this->incrementQuietly('view_count');
+    }
+
+    public function isVisibleTo(?User $user): bool
+    {
+        return in_array($this->statusValue(), ['active', 'sold'], true)
+            || ($user !== null && (int) $this->user_id === (int) $user->getKey());
     }
 
     public function hasContactDetails(): bool
@@ -604,29 +671,20 @@ class Listing extends Model implements HasMedia
         return (int) $this->user_id !== (int) $user->getKey();
     }
 
-    /**
-     * @return array{phone: string, email: string}
-     */
-    public function contactDetailsFor(?User $user): array
+    public function contactDetails(): array
     {
-        $canAccess = $this->canRevealContactTo($user)
-            || ($user && $this->user_id && (int) $this->user_id === (int) $user->getKey());
-
-        if (! $canAccess) {
-            return [
-                'phone' => '',
-                'email' => '',
-            ];
-        }
-
         return [
-            'phone' => filled($this->contact_phone) ? (string) $this->contact_phone : '',
-            'email' => filled($this->contact_email) ? (string) $this->contact_email : '',
+            'phone' => (string) ($this->contact_phone ?? ''),
+            'email' => (string) ($this->contact_email ?? ''),
         ];
     }
 
     public function markAsSold(): void
     {
+        if ($this->statusValue() !== 'active') {
+            return;
+        }
+
         $this->forceFill([
             'status' => 'sold',
         ])->save();
@@ -634,6 +692,10 @@ class Listing extends Model implements HasMedia
 
     public function republish(): void
     {
+        if (! in_array($this->statusValue(), ['expired', 'sold'], true)) {
+            return;
+        }
+
         $this->forceFill([
             'status' => 'active',
             'expires_at' => now()->addDays(self::DEFAULT_PANEL_EXPIRY_WINDOW_DAYS),
@@ -743,7 +805,7 @@ class Listing extends Model implements HasMedia
             },
         };
 
-        if ($this->status::class === $target) {
+        if ($target === $this->status::class) {
             return;
         }
 

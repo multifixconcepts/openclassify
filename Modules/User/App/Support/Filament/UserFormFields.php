@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Modules\User\App\Support\Filament;
 
 use A909M\FilamentStateFusion\Forms\Components\StateFusionSelect;
@@ -23,8 +25,8 @@ class UserFormFields
         return TextInput::make('password')
             ->password()
             ->required($requiredCallback)
-            ->dehydrateStateUsing(fn ($state) => filled($state) ? bcrypt($state) : null)
-            ->dehydrated(fn ($state) => filled($state));
+            ->dehydrateStateUsing(fn (mixed $state): mixed => filled($state) ? bcrypt($state) : null)
+            ->dehydrated(fn (mixed $state): mixed => filled($state));
     }
 
     public static function status(): StateFusionSelect

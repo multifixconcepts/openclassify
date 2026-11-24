@@ -1,128 +1,302 @@
-@extends('app::layouts.app')
-@section('content')
+@extends('site::layouts.app')
+
+@section('title', $listing->getAttribute('title'))
+@section('description', \Illuminate\Support\Str::limit(strip_tags((string) $listing->getAttribute('description')), 155))
+@section('og_image', $listing->primaryImageUrl('gallery') ?? '')
+
 @php
-    $title = trim((string) ($listing->title ?? ''));
-    $displayTitle = ($title !== '' && preg_match('/[\pL\pN]/u', $title)) ? $title : 'Untitled listing';
-
-    $city = trim((string) ($listing->city ?? ''));
-    $country = trim((string) ($listing->country ?? ''));
-    $location = implode(', ', array_filter([$city, $country], fn ($value) => $value !== ''));
-
-    $description = trim((string) ($listing->description ?? ''));
-    $displayDescription = ($description !== '' && preg_match('/[\pL\pN]/u', $description))
-        ? $description
-        : 'No description provided.';
-
-    $hasPrice = !is_null($listing->price);
-    $priceValue = $hasPrice ? (float) $listing->price : null;
+    $seller = $listing->getRelation('user');
+    $viewer = auth()->user();
+    $isOwner = $viewer !== null && $sellerId !== null && (int) $viewer->getKey() === $sellerId;
+    $city = trim((string) $listing->getAttribute('city'));
+    $country = trim((string) $listing->getAttribute('country'));
+    $place = collect([$city, $country])->filter()->implode(', ');
+    $createdAt = $listing->getAttribute('created_at');
+    $canContact = $viewer !== null && ! $isOwner && $sellerId !== null;
 @endphp
-<div class="container mx-auto px-4 py-8">
-    <div class="max-w-4xl mx-auto">
-        <div class="bg-white rounded-lg shadow-md overflow-hidden">
-            <div class="bg-gray-200 h-96 flex items-center justify-center">
-                <svg class="w-24 h-24 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+
+@section('content')
+<div class="shell shell--wide page">
+    <div class="stack stack--loose">
+        <nav class="breadcrumb" aria-label="Breadcrumb">
+            <a href="{{ route('home') }}">{{ __('site::messages.home') }}</a>
+            <span class="breadcrumb__separator">/</span>
+            <a href="{{ route('listings.index') }}">{{ __('site::messages.all_listings') }}</a>
+            @foreach($breadcrumbCategories as $crumb)
+                <span class="breadcrumb__separator">/</span>
+                <a href="{{ route('listings.index', ['category' => $crumb->getKey()]) }}">{{ $crumb->getAttribute('name') }}</a>
+            @endforeach
+        </nav>
+
+        <div class="grid grid--split">
+            <div class="stack stack--loose">
+                <section class="gallery" data-gallery>
+                    <div class="gallery__stage">
+                        @php $first = $gallery[0]['gallery'] ?? null; @endphp
+                        <img
+                            src="{{ \Modules\Listing\Support\ListingImageViewData::pickUrl($first) ?? '' }}"
+                            alt="{{ $listing->getAttribute('title') }}"
+                            data-gallery-stage
+                            fetchpriority="high"
+                        >
+                        @if(count($gallery) > 1)
+                            <button type="button" class="gallery__nav gallery__nav--previous" data-gallery-previous aria-label="{{ __('site::messages.back') }}">
+                                <x-ui.icon name="chevron-left"/>
+                            </button>
+                            <button type="button" class="gallery__nav gallery__nav--next" data-gallery-next aria-label="{{ __('site::messages.view_all') }}">
+                                <x-ui.icon name="chevron-right"/>
+                            </button>
+                            <span class="gallery__counter" data-gallery-counter>1 / {{ count($gallery) }}</span>
+                        @endif
+                    </div>
+
+                    @if(count($gallery) > 0)
+                        <div class="gallery__thumbs">
+                            @foreach($gallery as $index => $image)
+                                <button
+                                    type="button"
+                                    class="gallery__thumb {{ $index === 0 ? 'is-active' : '' }}"
+                                    data-gallery-thumb
+                                    data-gallery-source="{{ \Modules\Listing\Support\ListingImageViewData::pickUrl($image['gallery'] ?? null) }}"
+                                    data-gallery-alt="{{ $listing->getAttribute('title') }}"
+                                    aria-label="{{ $index + 1 }}"
+                                >
+                                    <img src="{{ \Modules\Listing\Support\ListingImageViewData::pickUrl($image['thumb'] ?? null) }}" alt="" loading="lazy">
+                                </button>
+                            @endforeach
+                        </div>
+                    @endif
+                </section>
+
+                <section class="card">
+                    <div class="card__body">
+                        <div class="stack stack--tight">
+                            <p class="text-price text-price--large">{{ $listing->panelPriceLabel() }}</p>
+                            <h1 class="title-page">{{ $listing->getAttribute('title') }}</h1>
+                            <div class="row row--wrap text-meta">
+                                @if($place !== '')
+                                    <span class="row" style="gap:var(--space-1)"><x-ui.icon name="map-pin" style="width:14px;height:14px"/>{{ $place }}</span>
+                                @endif
+                                @if($createdAt)
+                                    <span class="row" style="gap:var(--space-1)"><x-ui.icon name="clock" style="width:14px;height:14px"/><time datetime="{{ $createdAt->toIso8601String() }}">{{ $createdAt->diffForHumans() }}</time></span>
+                                @endif
+                                <span class="row" style="gap:var(--space-1)"><x-ui.icon name="eye" style="width:14px;height:14px"/>{{ trans_choice('site::messages.views', (int) $listing->getAttribute('view_count'), ['count' => (int) $listing->getAttribute('view_count')]) }}</span>
+                            </div>
+                        </div>
+
+                        @if(filled($listing->getAttribute('description')))
+                            <div class="stack stack--tight">
+                                <h2 class="card__title">{{ __('site::messages.description') }}</h2>
+                                <div class="prose">{!! nl2br(e($listing->getAttribute('description'))) !!}</div>
+                            </div>
+                        @endif
+
+                        @if(! empty($presentableCustomFields))
+                            <div class="stack stack--tight">
+                                <h2 class="card__title">{{ __('site::messages.details') }}</h2>
+                                <dl class="spec-list">
+                                    @foreach($presentableCustomFields as $field)
+                                        <div class="spec-list__row">
+                                            <dt class="spec-list__label">{{ $field['label'] }}</dt>
+                                            <dd class="spec-list__value">{{ $field['value'] }}</dd>
+                                        </div>
+                                    @endforeach
+                                </dl>
+                            </div>
+                        @endif
+
+                        <div class="stack stack--tight">
+                            <dl class="spec-list">
+                                <div class="spec-list__row">
+                                    <dt class="spec-list__label">{{ __('site::messages.listing_id') }}</dt>
+                                    <dd class="spec-list__value">#{{ $listing->getKey() }}</dd>
+                                </div>
+                                @if($listing->getRelation('category'))
+                                    <div class="spec-list__row">
+                                        <dt class="spec-list__label">{{ __('site::messages.category') }}</dt>
+                                        <dd class="spec-list__value">{{ $listing->getRelation('category')->getAttribute('name') }}</dd>
+                                    </div>
+                                @endif
+                            </dl>
+                        </div>
+                    </div>
+                </section>
+
+                @if($listingVideos->isNotEmpty())
+                    <section class="card">
+                        <div class="card__head"><h2 class="card__title">{{ __('site::messages.details') }}</h2></div>
+                        <div class="card__body">
+                            @foreach($listingVideos as $video)
+                                <video controls preload="none" style="width:100%;border-radius:var(--radius-md)">
+                                    <source src="{{ $video->playbackUrl() }}">
+                                </video>
+                            @endforeach
+                        </div>
+                    </section>
+                @endif
+
+                <div class="alert">
+                    <x-ui.icon name="shield"/>
+                    <span>{{ __('site::messages.safety_note') }}</span>
+                </div>
             </div>
-            <div class="p-6">
-                <div class="flex justify-between items-start">
-                    <h1 class="text-2xl font-bold text-gray-900">{{ $displayTitle }}</h1>
-                    <span class="text-3xl font-bold text-green-600">
-                        @if($hasPrice)
-                            @if($priceValue > 0)
-                                {{ number_format($priceValue, 0) }} {{ $listing->currency ?? 'USD' }}
-                            @else
-                                Free
+
+            <aside class="sticky-aside">
+                <section class="card">
+                    <div class="card__body seller-card">
+                        @if($seller)
+                            <div class="seller-card__identity">
+                                <span class="avatar">{{ \App\Support\UserDirectory::initials((string) $seller->getAttribute('name')) }}</span>
+                                <div class="stack stack--tight" style="gap:2px">
+                                    <a href="{{ route('sellers.show', $sellerId) }}" class="seller-card__name">{{ $seller->getAttribute('name') }}</a>
+                                    <x-ui.rating :average="$sellerReviewSummary['average']" :total="$sellerReviewSummary['total']"/>
+                                </div>
+                            </div>
+                        @endif
+
+                        @auth
+                            @if($canContact)
+                                <div class="stack stack--tight">
+                                    <form method="POST" action="{{ route('conversations.start', $listing) }}">
+                                        @csrf
+                                        <button type="submit" class="button button--primary button--block">
+                                            <x-ui.icon name="mail"/>
+                                            <span>{{ __('site::messages.send_message') }}</span>
+                                        </button>
+                                    </form>
+
+                                    @if($listing->hasContactDetails())
+                                        <div data-contact-reveal="{{ route('listings.contact', $listing) }}" class="contact-panel">
+                                            <button type="button" class="button button--secondary button--block" data-contact-trigger>
+                                                <x-ui.icon name="phone"/>
+                                                <span>{{ __('site::messages.show_contact') }}</span>
+                                            </button>
+                                            <div data-contact-output class="contact-panel">
+                                                <a class="contact-panel__value" data-contact-phone href="#"><x-ui.icon name="phone"/><span></span></a>
+                                                <a class="contact-panel__value" data-contact-email href="#"><x-ui.icon name="mail"/><span></span></a>
+                                            </div>
+                                        </div>
+                                    @endif
+                                </div>
+                            @elseif($isOwner)
+                                <a href="{{ route('panel.listings.edit', $listing) }}" class="button button--secondary button--block">
+                                    <x-ui.icon name="edit"/>
+                                    <span>{{ __('panel::messages.edit') }}</span>
+                                </a>
                             @endif
                         @else
-                            Price on request
-                        @endif
-                    </span>
-                </div>
-                <div class="mt-3 flex flex-wrap items-center gap-2">
-                    @auth
-                    <form method="POST" action="{{ route('favorites.listings.toggle', $listing) }}">
-                        @csrf
-                        <button type="submit" class="inline-flex items-center px-4 py-2 rounded-full text-sm font-semibold transition {{ $isListingFavorited ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-700 hover:bg-slate-200' }}">
-                            {{ $isListingFavorited ? '♥ Saved' : '♡ Save listing' }}
-                        </button>
-                    </form>
-                    @if($listing->user && (int) $listing->user->id !== (int) auth()->id())
-                    <form method="POST" action="{{ route('favorites.sellers.toggle', $listing->user) }}">
-                        @csrf
-                        <button type="submit" class="inline-flex items-center px-4 py-2 rounded-full text-sm font-semibold transition {{ $isSellerFavorited ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-700 hover:bg-slate-200' }}">
-                            {{ $isSellerFavorited ? 'Seller saved' : 'Save seller' }}
-                        </button>
-                    </form>
-                        @if($existingConversationId)
-                        <a href="{{ route('panel.inbox.index', ['conversation' => $existingConversationId]) }}" class="inline-flex items-center px-4 py-2 rounded-full text-sm font-semibold bg-rose-100 text-rose-700 hover:bg-rose-200 transition">
-                            Open chat
-                        </a>
-                        @else
-                        <form method="POST" action="{{ route('conversations.start', $listing) }}">
-                            @csrf
-                            <button type="submit" class="inline-flex items-center px-4 py-2 rounded-full text-sm font-semibold bg-rose-500 text-white hover:bg-rose-600 transition">
-                                Message seller
+                            <a href="{{ route('login') }}" class="button button--primary button--block">{{ __('site::messages.sign_in_to_message') }}</a>
+                        @endauth
+
+                        <div class="row">
+                            @auth
+                                <button
+                                    type="button"
+                                    class="button button--secondary {{ $isListingFavorited ? 'is-active' : '' }}"
+                                    data-favorite-toggle="{{ route('favorites.listings.toggle', $listing) }}"
+                                    aria-pressed="{{ $isListingFavorited ? 'true' : 'false' }}"
+                                >
+                                    <x-ui.icon name="heart"/>
+                                    <span>{{ __('site::messages.save') }}</span>
+                                </button>
+                            @endauth
+                            <button
+                                type="button"
+                                class="button button--secondary"
+                                data-share="{{ route('listings.show', $listing) }}"
+                                data-share-title="{{ $listing->getAttribute('title') }}"
+                                data-share-label="{{ __('site::messages.share') }}"
+                                data-share-done="{{ __('site::messages.copied') }}"
+                            >
+                                <x-ui.icon name="share"/>
+                                <span>{{ __('site::messages.share') }}</span>
                             </button>
+                        </div>
+                    </div>
+                </section>
+
+                @if($canContact && $listing->getAttribute('price') !== null)
+                    <section class="card">
+                        <div class="card__head">
+                            <h2 class="card__title">{{ __('offer::messages.make_offer') }}</h2>
+                            @if($bestOffer)
+                                <span class="badge badge--accent">{{ __('offer::messages.best_offer') }} {{ $bestOffer->amountLabel() }}</span>
+                            @endif
+                        </div>
+                        <form method="POST" action="{{ route('offers.store', $listing) }}" class="card__body">
+                            @csrf
+                            <div class="field">
+                                <label class="field__label" for="offer-amount">{{ __('offer::messages.your_offer') }}</label>
+                                <span class="input-affix">
+                                    <input id="offer-amount" type="number" name="amount" min="1" step="0.01" class="input" required
+                                           value="{{ round((float) $listing->getAttribute('price') * 0.9, 2) }}">
+                                    <span class="input-affix__suffix">{{ $listing->getAttribute('currency') }}</span>
+                                </span>
+                            </div>
+                            <div class="field">
+                                <label class="field__label" for="offer-message">{{ __('offer::messages.offer_message') }}</label>
+                                <textarea id="offer-message" name="message" class="textarea" rows="3" maxlength="500"></textarea>
+                            </div>
+                            <button type="submit" class="button button--accent button--block">{{ __('offer::messages.send_offer') }}</button>
                         </form>
-                        @endif
-                    @endif
-                    @else
-                    <a href="{{ route('login') }}" class="inline-flex items-center px-4 py-2 rounded-full text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition">
-                        Log in to save
-                    </a>
-                    @endauth
-                </div>
-                <p class="text-gray-500 mt-2">{{ $location !== '' ? $location : 'Location not specified' }}</p>
-                <p class="text-gray-500 text-sm">Posted {{ $listing->created_at?->diffForHumans() ?? 'recently' }}</p>
-                <div class="mt-4 border-t pt-4">
-                    <h2 class="font-semibold text-lg mb-2">Description</h2>
-                    <p class="text-gray-700">{{ $displayDescription }}</p>
-                </div>
-                @if(($listingVideos ?? collect())->isNotEmpty())
-                <div class="mt-6 border-t pt-4">
-                    <h2 class="font-semibold text-lg mb-3">Videos</h2>
-                    <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-                        @foreach($listingVideos as $video)
-                        <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                            <video class="w-full rounded-lg bg-black" controls preload="metadata" src="{{ $video->playableUrl() }}"></video>
-                            <p class="mt-2 text-sm font-semibold text-slate-800">{{ $video->titleLabel() }}</p>
-                        </div>
-                        @endforeach
-                    </div>
-                </div>
+                    </section>
                 @endif
-                @if(($presentableCustomFields ?? []) !== [])
-                <div class="mt-6 border-t pt-4">
-                    <h2 class="font-semibold text-lg mb-3">Listing details</h2>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        @foreach($presentableCustomFields as $field)
-                        <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                            <p class="text-xs uppercase tracking-wide text-slate-500">{{ $field['label'] }}</p>
-                            <p class="text-sm font-medium text-slate-800 mt-1">{{ $field['value'] }}</p>
-                        </div>
-                        @endforeach
-                    </div>
-                </div>
-                @endif
-                <div class="mt-6 bg-gray-50 rounded-lg p-4">
-                    <h2 class="font-semibold text-lg mb-3">Contact Seller</h2>
-                    @if($listing->user)
-                    <p class="text-gray-700"><span class="font-medium">Name:</span> {{ $listing->user->name }}</p>
-                    @endif
-                    @if($listing->contact_phone)
-                    <p class="text-gray-700"><span class="font-medium">Phone:</span> {{ $listing->contact_phone }}</p>
-                    @endif
-                    @if($listing->contact_email)
-                    <p class="text-gray-700"><span class="font-medium">Email:</span> {{ $listing->contact_email }}</p>
-                    @endif
-                    @if(!$listing->contact_phone && !$listing->contact_email)
-                    <p class="text-gray-700">No contact details provided.</p>
-                    @endif
-                </div>
-                <div class="mt-6">
-                    <a href="{{ route('listings.index') }}" class="text-blue-600 hover:underline">← Back to listings</a>
-                </div>
-            </div>
+
+                @auth
+                    @unless($isOwner)
+                        <section class="card">
+                            <div class="card__body card__body--tight">
+                                <button type="button" class="button button--ghost button--block" data-reveal-target="report-panel">
+                                    <x-ui.icon name="flag"/>
+                                    <span>{{ __('report::messages.report_listing') }}</span>
+                                </button>
+
+                                <form method="POST" action="{{ route('reports.store') }}" id="report-panel" class="stack stack--tight" hidden>
+                                    @csrf
+                                    <input type="hidden" name="subject_type" value="listing">
+                                    <input type="hidden" name="subject_id" value="{{ $listing->getKey() }}">
+                                    <div class="field">
+                                        <label class="field__label" for="report-reason">{{ __('report::messages.reason') }}</label>
+                                        <select id="report-reason" name="reason" class="select" required>
+                                            @foreach($reportReasons as $reason)
+                                                <option value="{{ $reason }}">{{ __('report::messages.reason_'.$reason) }}</option>
+                                            @endforeach
+                                        </select>
+                                    </div>
+                                    <div class="field">
+                                        <label class="field__label" for="report-details">{{ __('report::messages.details') }}</label>
+                                        <textarea id="report-details" name="details" class="textarea" rows="3" maxlength="1000" placeholder="{{ __('report::messages.placeholder') }}"></textarea>
+                                    </div>
+                                    <button type="submit" class="button button--critical button--block">{{ __('report::messages.submit') }}</button>
+                                </form>
+                            </div>
+                        </section>
+                    @endunless
+                @endauth
+            </aside>
         </div>
+
+        @if($relatedListings->isNotEmpty())
+            <section class="section">
+                <div class="section__head">
+                    <h2 class="title-section">{{ __('site::messages.similar_listings') }}</h2>
+                </div>
+                <div class="grid grid--listings">
+                    @foreach($relatedListings->take(10) as $related)
+                        <x-ui.listing-card :listing="$related"/>
+                    @endforeach
+                </div>
+            </section>
+        @endif
     </div>
 </div>
+
+@if($canContact)
+    <div class="action-bar">
+        <form method="POST" action="{{ route('conversations.start', $listing) }}" style="flex:1 1 0">
+            @csrf
+            <button type="submit" class="button button--primary button--block">{{ __('site::messages.send_message') }}</button>
+        </form>
+    </div>
+@endif
 @endsection

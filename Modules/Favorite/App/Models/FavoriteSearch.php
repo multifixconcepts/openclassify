@@ -1,23 +1,29 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Modules\Favorite\App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Modules\Category\Models\Category;
 use Modules\User\App\Models\User;
 
 class FavoriteSearch extends Model
 {
+    use SoftDeletes;
+
     protected $fillable = ['user_id', 'label', 'search_term', 'category_id', 'filters', 'signature'];
 
     protected $casts = ['filters' => 'array'];
 
-    public function user()
+    public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
     }
 
-    public function category()
+    public function category(): BelongsTo
     {
         return $this->belongsTo(Category::class);
     }
@@ -25,8 +31,8 @@ class FavoriteSearch extends Model
     public static function normalizeFilters(array $filters): array
     {
         return collect($filters)
-            ->map(fn ($value) => is_string($value) ? trim($value) : $value)
-            ->filter(fn ($value) => $value !== null && $value !== '' && $value !== [])
+            ->map(fn (mixed $value): mixed => is_string($value) ? trim($value) : $value)
+            ->filter(fn (mixed $value): bool => $value !== null && $value !== '' && $value !== [])
             ->sortKeys()
             ->all();
     }
@@ -51,7 +57,7 @@ class FavoriteSearch extends Model
             $labelParts[] = $categoryName;
         }
 
-        return $labelParts !== [] ? implode(' · ', $labelParts) : 'Filtered search';
+        return $labelParts !== [] ? implode(' · ', $labelParts) : __('favorite::messages.filtered_search');
     }
 
     public static function isSavedForUser(User $user, array $filters): bool

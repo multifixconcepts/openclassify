@@ -1,23 +1,24 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Providers;
 
 use BezhanSalleh\LanguageSwitch\LanguageSwitch;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
+use Modules\User\App\Models\User;
+use SocialiteProviders\Apple\Provider;
 use SocialiteProviders\Manager\SocialiteWasCalled;
 
 class AppServiceProvider extends ServiceProvider
 {
-    public function register(): void
-    {
-    }
+    public function register(): void {}
 
     public function boot(): void
     {
-        Gate::before(function ($user): null | bool {
+        Gate::before(function (User $user): ?bool {
             if (method_exists($user, 'hasRole') && $user->hasRole('admin')) {
                 return true;
             }
@@ -25,10 +26,8 @@ class AppServiceProvider extends ServiceProvider
             return null;
         });
 
-        View::addNamespace('app', resource_path('views'));
-
         Event::listen(function (SocialiteWasCalled $event): void {
-            $event->extendSocialite('apple', \SocialiteProviders\Apple\Provider::class);
+            $event->extendSocialite('apple', Provider::class);
         });
 
         $availableLocales = config('app.available_locales', ['en']);
@@ -41,7 +40,7 @@ class AppServiceProvider extends ServiceProvider
             $switch
                 ->locales($availableLocales)
                 ->labels(collect($availableLocales)->mapWithKeys(
-                    fn (string $locale) => [$locale => $localeLabels[$locale] ?? strtoupper($locale)]
+                    fn (string $locale): array => [$locale => $localeLabels[$locale] ?? strtoupper($locale)]
                 )->all())
                 ->visible(insidePanels: count($availableLocales) > 1, outsidePanels: false);
         });

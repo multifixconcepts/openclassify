@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Modules\Panel\App\Http\Controllers;
 
 use App\Http\Controllers\Controller;
@@ -9,16 +11,30 @@ use Illuminate\View\View;
 use Modules\Listing\Models\Listing;
 use Modules\Listing\Support\ListingCustomFieldSchemaBuilder;
 use Modules\Listing\Support\ListingPanelHelper;
+use Modules\Notification\Models\UserNotification;
+use Modules\Offer\Models\Offer;
 use Modules\Panel\App\Http\Requests\StoreVideoRequest;
 use Modules\Panel\App\Http\Requests\UpdateListingRequest;
 use Modules\Panel\App\Http\Requests\UpdateVideoRequest;
+use Modules\Review\Models\Review;
 use Modules\Video\Models\Video;
 
 class PanelController extends Controller
 {
-    public function index(): RedirectResponse
+    public function index(Request $request): View
     {
-        return redirect()->route('panel.listings.index');
+        $userId = (int) $request->user()->getKey();
+
+        return view('panel::dashboard', [
+            'stats' => [
+                'active' => Listing::activeCountForUser($userId),
+                'views' => Listing::totalViewsForUser($userId),
+                'offers' => Offer::pendingCountForSeller($userId),
+                'reviews' => Review::summaryForSeller($userId),
+            ],
+            'recentListings' => Listing::recentForUser($userId),
+            'notifications' => UserNotification::latestForUser($userId),
+        ]);
     }
 
     public function create(): View
@@ -32,7 +48,7 @@ class PanelController extends Controller
         $search = trim((string) $request->string('search'));
         $status = (string) $request->string('status', 'all');
 
-        if (! in_array($status, ['all', 'sold', 'expired'], true)) {
+        if (! in_array($status, ['all', 'active', 'pending', 'sold', 'expired'], true)) {
             $status = 'all';
         }
 
@@ -56,7 +72,7 @@ class PanelController extends Controller
                 $listing->category_id ? (int) $listing->category_id : null,
                 (array) $listing->custom_fields,
             ),
-            'statusOptions' => Listing::panelStatusOptions(),
+            'statusOptions' => $listing->ownerStatusOptions(),
         ]);
     }
 
@@ -70,7 +86,7 @@ class PanelController extends Controller
 
         return redirect()
             ->route('panel.listings.edit', $listing)
-            ->with('success', 'Listing updated.');
+            ->with('success', __('panel::messages.listing_updated'));
     }
 
     public function videos(Request $request): View
@@ -82,7 +98,7 @@ class PanelController extends Controller
     {
         $validated = $request->validated();
 
-        $listing = $request->user()->listings()->whereKey($validated['listing_id'])->firstOrFail();
+        $listing = $request->user()->ownedListing((int) $validated['listing_id']);
 
         $video = Video::createFromUploadedFile($listing, $request->file('video_file'), [
             'title' => $validated['title'] ?? null,
@@ -93,7 +109,7 @@ class PanelController extends Controller
 
         return redirect()
             ->route('panel.videos.edit', $video)
-            ->with('success', 'Video uploaded.');
+            ->with('success', __('panel::messages.video_uploaded'));
     }
 
     public function editVideo(Request $request, Video $video): View
@@ -111,7 +127,7 @@ class PanelController extends Controller
         $video->assertOwnedBy($request->user());
         $validated = $request->validated();
 
-        $listing = $request->user()->listings()->whereKey($validated['listing_id'])->firstOrFail();
+        $listing = $request->user()->ownedListing((int) $validated['listing_id']);
 
         $video->updateFromPanel([
             'listing_id' => $listing->getKey(),
@@ -123,7 +139,7 @@ class PanelController extends Controller
 
         return redirect()
             ->route('panel.videos.edit', $video)
-            ->with('success', 'Video updated.');
+            ->with('success', __('panel::messages.video_updated'));
     }
 
     public function destroyVideo(Request $request, Video $video): RedirectResponse
@@ -133,7 +149,7 @@ class PanelController extends Controller
 
         return redirect()
             ->route('panel.videos.index')
-            ->with('success', 'Video deleted.');
+            ->with('success', __('panel::messages.video_deleted'));
     }
 
     public function profile(Request $request): View
@@ -150,7 +166,7 @@ class PanelController extends Controller
         $listing->assertOwnedBy($request->user());
         $listing->delete();
 
-        return back()->with('success', 'Listing removed.');
+        return back()->with('success', __('panel::messages.listing_removed'));
     }
 
     public function markListingAsSold(Request $request, Listing $listing): RedirectResponse
@@ -158,7 +174,7 @@ class PanelController extends Controller
         $listing->assertOwnedBy($request->user());
         $listing->markAsSold();
 
-        return back()->with('success', 'Listing marked as sold.');
+        return back()->with('success', __('panel::messages.listing_sold'));
     }
 
     public function republishListing(Request $request, Listing $listing): RedirectResponse
@@ -166,6 +182,6 @@ class PanelController extends Controller
         $listing->assertOwnedBy($request->user());
         $listing->republish();
 
-        return back()->with('success', 'Listing republished.');
+        return back()->with('success', __('panel::messages.listing_republished'));
     }
 }

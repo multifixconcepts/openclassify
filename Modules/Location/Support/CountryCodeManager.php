@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Modules\Location\Support;
 
 use Illuminate\Support\Collection;
@@ -109,23 +111,6 @@ class CountryCodeManager
                     || str_contains($normalizedInput, $normalizedLabel)
                     || str_contains($normalizedInput, $normalizedEnglish);
             })['country_code'] ?? null;
-    }
-
-    public static function normalizeStoredCountry(?string $value): ?string
-    {
-        $value = trim((string) $value);
-
-        if ($value === '') {
-            return null;
-        }
-
-        $countryCode = self::countryCodeFromLabelOrCode($value);
-
-        if (! $countryCode) {
-            return $value;
-        }
-
-        return self::labelFromCountryCode($countryCode) ?? $value;
     }
 
     private static function countries(): Collection

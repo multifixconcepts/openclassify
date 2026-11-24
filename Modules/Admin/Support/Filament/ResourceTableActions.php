@@ -1,10 +1,14 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Modules\Admin\Support\Filament;
 
 use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
+use Filament\Actions\RestoreAction;
+use Illuminate\Database\Eloquent\Model;
 
 final class ResourceTableActions
 {
@@ -13,6 +17,7 @@ final class ResourceTableActions
         return [
             EditAction::make(),
             DeleteAction::make(),
+            RestoreAction::make(),
         ];
     }
 
@@ -23,6 +28,7 @@ final class ResourceTableActions
             self::activities($resourceClass),
             ...$afterActivity,
             DeleteAction::make(),
+            RestoreAction::make(),
         ];
     }
 
@@ -30,6 +36,6 @@ final class ResourceTableActions
     {
         return Action::make('activities')
             ->icon('heroicon-o-clock')
-            ->url(fn ($record): string => $resourceClass::getUrl('activities', ['record' => $record]));
+            ->url(fn (Model $record): string => $resourceClass::getUrl('activities', ['record' => $record]));
     }
 }

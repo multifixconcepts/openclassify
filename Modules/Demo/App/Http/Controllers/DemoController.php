@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Modules\Demo\App\Http\Controllers;
 
 use App\Http\Controllers\Controller;
@@ -17,8 +19,7 @@ class DemoController extends Controller
         Request $request,
         DemoSchemaManager $demoSchemaManager,
         TurnstileVerifier $turnstileVerifier,
-    ): RedirectResponse
-    {
+    ): RedirectResponse {
         abort_unless(config('demo.enabled'), 404);
 
         $cookieName = (string) config('demo.cookie_name', 'oc2_demo');
@@ -28,13 +29,13 @@ class DemoController extends Controller
         if ($turnstileVerifier->requiredForDemo() && ! $turnstileVerifier->enabled()) {
             return redirect()
                 ->to($redirectTo)
-                ->with('error', 'Security verification must be enabled before starting a demo.');
+                ->with('error', __('demo::messages.verification_required'));
         }
 
         if ($turnstileVerifier->enabled() && ! $turnstileVerifier->configured()) {
             return redirect()
                 ->to($redirectTo)
-                ->with('error', 'Security verification is unavailable right now. Please contact support.');
+                ->with('error', __('demo::messages.verification_unavailable'));
         }
 
         if (! $turnstileVerifier->verify(
@@ -43,7 +44,7 @@ class DemoController extends Controller
         )) {
             return redirect()
                 ->to($redirectTo)
-                ->with('error', 'Security verification failed. Please complete the check and try again.');
+                ->with('error', __('demo::messages.verification_failed'));
         }
 
         if (function_exists('set_time_limit')) {
@@ -72,7 +73,7 @@ class DemoController extends Controller
                 (int) config('demo.ttl_minutes', 360),
             ));
 
-            return redirect()->to($redirectTo)->with('success', 'Your private demo is ready.');
+            return redirect()->to($redirectTo)->with('success', __('demo::messages.demo_ready'));
         } catch (Throwable $exception) {
             report($exception);
 

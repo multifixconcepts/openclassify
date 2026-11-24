@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -11,8 +13,6 @@ use Modules\Site\App\Http\Middleware\SetLocale;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
-        web: __DIR__.'/../routes/web.php',
-        commands: __DIR__.'/../routes/console.php',
         channels: __DIR__.'/../routes/channels.php',
         health: '/up',
     )
@@ -28,6 +28,4 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->appendToPriorityList(BootstrapAppData::class, SetLocale::class);
         $middleware->prependToPriorityList(AuthenticatesRequests::class, ResolveDemoRequest::class);
     })
-    ->withExceptions(function (Exceptions $exceptions): void {
-        //
-    })->create();
+    ->withExceptions(function (Exceptions $exceptions): void {})->create();

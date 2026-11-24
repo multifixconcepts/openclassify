@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Modules\Panel\App\Providers;
 
 use Illuminate\Support\ServiceProvider;
@@ -12,6 +14,7 @@ class PanelServiceProvider extends ServiceProvider
     {
         $this->loadRoutesFrom(module_path('Panel', 'routes/web.php'));
         $this->loadViewsFrom(module_path('Panel', 'resources/views'), 'panel');
+        $this->loadTranslationsFrom(module_path('Panel', 'lang'), 'panel');
 
         Livewire::component('panel-quick-listing-form', PanelQuickListingForm::class);
     }

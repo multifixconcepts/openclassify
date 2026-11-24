@@ -1,13 +1,16 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Modules\Site\App\Http\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response;
 
 class SetLocale
 {
-    public function handle(Request $request, Closure $next): mixed
+    public function handle(Request $request, Closure $next): Response
     {
         $locale = session('locale', config('app.locale'));
         $available = config('app.available_locales', ['en']);

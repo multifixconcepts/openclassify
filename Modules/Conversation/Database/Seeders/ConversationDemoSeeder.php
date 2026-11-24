@@ -1,7 +1,10 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Modules\Conversation\Database\Seeders;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Seeder;
 use Modules\Conversation\App\Models\Conversation;
 use Modules\Conversation\App\Models\ConversationMessage;
@@ -24,7 +27,7 @@ class ConversationDemoSeeder extends Seeder
         }
 
         ConversationMessage::query()
-            ->whereHas('conversation', fn ($query) => $query->whereIn('buyer_id', $users->pluck('id'))->orWhereIn('seller_id', $users->pluck('id')))
+            ->whereHas('conversation', fn (Builder $query): Builder => $query->whereIn('buyer_id', $users->pluck('id'))->orWhereIn('seller_id', $users->pluck('id')))
             ->delete();
 
         Conversation::query()

@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Modules\Category\Filament\Admin\Resources;
 
 use BackedEnum;
@@ -8,13 +10,18 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Str;
 use Modules\Admin\Support\Filament\ResourceTableActions;
 use Modules\Admin\Support\Filament\ResourceTableColumns;
-use Modules\Category\Models\Category;
+use Modules\Admin\Support\Filament\ResourceTableFilters;
 use Modules\Category\Filament\Admin\Resources\CategoryResource\Pages;
+use Modules\Category\Models\Category;
 use UnitEnum;
 
 class CategoryResource extends Resource
@@ -28,7 +35,7 @@ class CategoryResource extends Resource
     public static function form(Schema $schema): Schema
     {
         return $schema->schema([
-            TextInput::make('name')->required()->maxLength(255)->live(onBlur: true)->afterStateUpdated(fn ($state, $set) => $set('slug', \Illuminate\Support\Str::slug($state))),
+            TextInput::make('name')->required()->maxLength(255)->live(onBlur: true)->afterStateUpdated(fn (mixed $state, Set $set): mixed => $set('slug', Str::slug($state))),
             TextInput::make('slug')->required()->maxLength(255)->unique(ignoreRecord: true),
             TextInput::make('description')->maxLength(500),
             TextInput::make('icon')->maxLength(100),
@@ -40,7 +47,7 @@ class CategoryResource extends Resource
 
     public static function table(Table $table): Table
     {
-        return $table->columns([
+        return ResourceTableFilters::layout($table->columns([
             ResourceTableColumns::id(),
             TextColumn::make('name')
                 ->searchable()
@@ -51,11 +58,33 @@ class CategoryResource extends Resource
             TextColumn::make('listings_count')->label('Listings'),
             ResourceTableColumns::activeIcon(),
             TextColumn::make('sort_order')->sortable(),
+        ]), [
+            TernaryFilter::make('is_active')
+                ->label('Active')
+                ->queries(
+                    true: fn (Builder $query): Builder => $query->where('categories.is_active', true),
+                    false: fn (Builder $query): Builder => $query->where('categories.is_active', false),
+                    blank: fn (Builder $query): Builder => $query,
+                ),
+            TernaryFilter::make('has_listings')
+                ->label('Has listings')
+                ->queries(
+                    true: fn (Builder $query): Builder => $query->has('listings'),
+                    false: fn (Builder $query): Builder => $query->doesntHave('listings'),
+                    blank: fn (Builder $query): Builder => $query,
+                ),
+            TernaryFilter::make('is_root')
+                ->label('Top level')
+                ->queries(
+                    true: fn (Builder $query): Builder => $query->whereNull('categories.parent_id'),
+                    false: fn (Builder $query): Builder => $query->whereNotNull('categories.parent_id'),
+                    blank: fn (Builder $query): Builder => $query,
+                ),
         ])->actions([
             Action::make('toggleChildren')
                 ->label(fn (Category $record, Pages\ListCategories $livewire): string => $livewire->hasExpandedChildren($record) ? 'Hide subcategories' : 'Show subcategories')
                 ->icon(fn (Category $record, Pages\ListCategories $livewire): string => $livewire->hasExpandedChildren($record) ? 'heroicon-o-chevron-down' : 'heroicon-o-chevron-right')
-                ->action(fn (Category $record, Pages\ListCategories $livewire) => $livewire->toggleChildren($record))
+                ->action(fn (Category $record, Pages\ListCategories $livewire): mixed => $livewire->toggleChildren($record))
                 ->visible(fn (Category $record): bool => $record->parent_id === null && $record->children_count > 0),
             ...ResourceTableActions::editActivityDelete(static::class),
         ]);

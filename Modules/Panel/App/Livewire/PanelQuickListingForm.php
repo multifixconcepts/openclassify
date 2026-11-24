@@ -1,10 +1,12 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Modules\Panel\App\Livewire;
 
+use Illuminate\Contracts\View\View;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Livewire\Component;
@@ -13,7 +15,6 @@ use Livewire\Features\SupportFileUploads\WithFileUploads;
 use Modules\Category\Models\Category;
 use Modules\Listing\Models\Listing;
 use Modules\Listing\Models\ListingCustomField;
-use Modules\Listing\Support\ListingCustomFieldSchemaBuilder;
 use Modules\Listing\Support\ListingPanelHelper;
 use Modules\Listing\Support\QuickListingCategorySuggester;
 use Modules\Location\Models\City;
@@ -91,7 +92,7 @@ class PanelQuickListingForm extends Component
         $this->restoreDraft();
     }
 
-    public function render()
+    public function render(): View
     {
         return view('panel::quick-create');
     }
@@ -163,14 +164,6 @@ class PanelQuickListingForm extends Component
         $this->publishError = null;
         $this->validateCategoryStep();
         $this->currentStep = 3;
-    }
-
-    public function goToFeaturesStep(): void
-    {
-        $this->publishError = null;
-        $this->validateCategoryStep();
-        $this->validateDetailsStep();
-        $this->currentStep = 4;
     }
 
     public function goToPreviewStep(): void
@@ -355,17 +348,6 @@ class PanelQuickListingForm extends Component
         };
     }
 
-    public function getSelectedCategoryNameProperty(): ?string
-    {
-        if (! $this->selectedCategoryId) {
-            return null;
-        }
-
-        $category = collect($this->categories)->firstWhere('id', $this->selectedCategoryId);
-
-        return $category['name'] ?? null;
-    }
-
     public function getSelectedCategoryPathProperty(): string
     {
         if (! $this->selectedCategoryId) {
@@ -373,21 +355,6 @@ class PanelQuickListingForm extends Component
         }
 
         return implode(' › ', $this->categoryPathParts($this->selectedCategoryId));
-    }
-
-    public function getDetectedAlternativeNamesProperty(): array
-    {
-        if ($this->detectedAlternatives === []) {
-            return [];
-        }
-
-        $categoriesById = collect($this->categories)->keyBy('id');
-
-        return collect($this->detectedAlternatives)
-            ->map(fn (int $id): ?string => $categoriesById[$id]['name'] ?? null)
-            ->filter()
-            ->values()
-            ->all();
     }
 
     public function getAvailableCitiesProperty(): array
@@ -438,47 +405,9 @@ class PanelQuickListingForm extends Component
         return $city['name'] ?? null;
     }
 
-    public function getPreviewCustomFieldsProperty(): array
-    {
-        return ListingCustomFieldSchemaBuilder::presentableValues(
-            $this->selectedCategoryId,
-            $this->sanitizedCustomFieldValues(),
-        );
-    }
-
-    public function getTitleCharactersProperty(): int
-    {
-        return mb_strlen($this->listingTitle);
-    }
-
-    public function getDescriptionCharactersProperty(): int
-    {
-        return mb_strlen($this->description);
-    }
-
     public function getCurrentUserNameProperty(): string
     {
         return (string) (auth()->user()?->name ?: 'User');
-    }
-
-    public function getCurrentUserInitialProperty(): string
-    {
-        return Str::upper(Str::substr($this->currentUserName, 0, 1));
-    }
-
-    public function categoryIconComponent(?string $icon): string
-    {
-        return match ($icon) {
-            'car' => 'heroicon-o-truck',
-            'laptop', 'computer' => 'heroicon-o-computer-desktop',
-            'shirt' => 'heroicon-o-swatch',
-            'home', 'sofa' => 'heroicon-o-home-modern',
-            'briefcase' => 'heroicon-o-briefcase',
-            'wrench' => 'heroicon-o-wrench-screwdriver',
-            'football' => 'heroicon-o-trophy',
-            'phone', 'mobile' => 'heroicon-o-device-phone-mobile',
-            default => 'heroicon-o-tag',
-        };
     }
 
     private function validatePhotos(): void
@@ -588,7 +517,7 @@ class PanelQuickListingForm extends Component
             ];
 
             if ($type === ListingCustomField::TYPE_SELECT) {
-                $options = collect($field['options'] ?? [])->map(fn ($option): string => (string) $option)->all();
+                $options = collect($field['options'] ?? [])->map(fn (mixed $option): string => (string) $option)->all();
                 $fieldRules[] = Rule::in($options);
             }
 
@@ -668,8 +597,8 @@ class PanelQuickListingForm extends Component
         $fieldsByName = collect($this->listingCustomFields)->keyBy('name');
 
         return collect($this->customFieldValues)
-            ->filter(fn ($value, $key): bool => $fieldsByName->has((string) $key))
-            ->map(function ($value, $key) use ($fieldsByName): mixed {
+            ->filter(fn (mixed $value, int|string $key): bool => $fieldsByName->has((string) $key))
+            ->map(function (mixed $value, int|string $key) use ($fieldsByName): mixed {
                 $field = $fieldsByName->get((string) $key);
                 $type = (string) ($field['type'] ?? ListingCustomField::TYPE_TEXT);
 
@@ -679,7 +608,7 @@ class PanelQuickListingForm extends Component
                     default => is_string($value) ? trim($value) : $value,
                 };
             })
-            ->filter(function ($value, $key) use ($fieldsByName): bool {
+            ->filter(function (mixed $value, int|string $key) use ($fieldsByName): bool {
                 $field = $fieldsByName->get((string) $key);
                 $type = (string) ($field['type'] ?? ListingCustomField::TYPE_TEXT);
 
@@ -777,9 +706,9 @@ class PanelQuickListingForm extends Component
 
     private function stepForValidationErrors(array $keys): int
     {
-        $normalizedKeys = collect($keys)->map(fn ($key) => (string) $key)->values();
+        $normalizedKeys = collect($keys)->map(fn (int|string $key): string => (string) $key)->values();
 
-        if ($normalizedKeys->contains(fn ($key) => str_starts_with($key, 'photos') || str_starts_with($key, 'videos'))) {
+        if ($normalizedKeys->contains(fn (int|string $key): bool => str_starts_with($key, 'photos') || str_starts_with($key, 'videos'))) {
             return 1;
         }
 
@@ -787,7 +716,7 @@ class PanelQuickListingForm extends Component
             return 2;
         }
 
-        if ($normalizedKeys->contains(fn ($key) => in_array($key, [
+        if ($normalizedKeys->contains(fn (int|string $key): mixed => in_array($key, [
             'listingTitle',
             'price',
             'description',
@@ -797,7 +726,7 @@ class PanelQuickListingForm extends Component
             return 3;
         }
 
-        if ($normalizedKeys->contains(fn ($key) => str_starts_with($key, 'customFieldValues.'))) {
+        if ($normalizedKeys->contains(fn (int|string $key): mixed => str_starts_with($key, 'customFieldValues.'))) {
             return 4;
         }
 
@@ -820,7 +749,7 @@ class PanelQuickListingForm extends Component
         $this->detectedConfidence = isset($draft['detectedConfidence']) ? (float) $draft['detectedConfidence'] : null;
         $this->detectedReason = isset($draft['detectedReason']) ? (string) $draft['detectedReason'] : null;
         $this->detectedError = isset($draft['detectedError']) ? (string) $draft['detectedError'] : null;
-        $this->detectedAlternatives = collect($draft['detectedAlternatives'] ?? [])->filter(fn ($id) => is_numeric($id))->map(fn ($id) => (int) $id)->values()->all();
+        $this->detectedAlternatives = collect($draft['detectedAlternatives'] ?? [])->filter(fn (int|string $id): mixed => is_numeric($id))->map(fn (int|string $id): int => (int) $id)->values()->all();
         $this->listingTitle = (string) ($draft['listingTitle'] ?? '');
         $this->price = (string) ($draft['price'] ?? '');
         $this->description = (string) ($draft['description'] ?? '');

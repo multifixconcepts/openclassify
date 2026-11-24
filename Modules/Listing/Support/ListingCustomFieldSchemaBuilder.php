@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Modules\Listing\Support;
 
 use Filament\Forms\Components\DatePicker;
@@ -16,19 +18,12 @@ class ListingCustomFieldSchemaBuilder
 {
     public static function hasFields(?int $categoryId): bool
     {
-        return ListingCustomField::query()
-            ->active()
-            ->forCategory($categoryId)
-            ->exists();
+        return ListingCustomField::hasActiveForCategory($categoryId);
     }
 
     public static function formComponents(?int $categoryId): array
     {
-        return ListingCustomField::query()
-            ->active()
-            ->forCategory($categoryId)
-            ->ordered()
-            ->get()
+        return ListingCustomField::orderedActiveForCategory($categoryId)
             ->map(fn (ListingCustomField $field): ?Component => self::makeFieldComponent($field))
             ->filter()
             ->values()
@@ -41,12 +36,7 @@ class ListingCustomFieldSchemaBuilder
             return [];
         }
 
-        $fieldsByName = ListingCustomField::query()
-            ->active()
-            ->forCategory($categoryId)
-            ->ordered()
-            ->get()
-            ->keyBy('name');
+        $fieldsByName = ListingCustomField::orderedActiveForCategory($categoryId)->keyBy('name');
 
         $result = [];
 
@@ -61,7 +51,7 @@ class ListingCustomFieldSchemaBuilder
             if (is_bool($value)) {
                 $displayValue = $value ? 'Yes' : 'No';
             } elseif (is_array($value)) {
-                $displayValue = implode(', ', array_map(fn ($item): string => (string) $item, $value));
+                $displayValue = implode(', ', array_map(fn (mixed $item): string => (string) $item, $value));
             } elseif ($field?->type === ListingCustomField::TYPE_DATE) {
                 try {
                     $displayValue = Carbon::parse((string) $value)->format('M j, Y');

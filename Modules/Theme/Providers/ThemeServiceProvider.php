@@ -1,7 +1,10 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Modules\Theme\Providers;
 
+use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
 use Modules\Theme\Support\ThemeManager;
 
@@ -11,7 +14,7 @@ class ThemeServiceProvider extends ServiceProvider
     {
         $this->mergeConfigFrom(module_path('Theme', 'config/theme.php'), 'theme');
 
-        $this->app->singleton(ThemeManager::class, function ($app): ThemeManager {
+        $this->app->singleton(ThemeManager::class, function (Application $app): ThemeManager {
             return new ThemeManager($app['config']);
         });
     }

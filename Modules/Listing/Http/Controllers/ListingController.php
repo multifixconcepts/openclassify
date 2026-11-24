@@ -1,55 +1,41 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Modules\Listing\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
+use Modules\Category\Models\Category;
 use Modules\Conversation\App\Models\Conversation;
 use Modules\Favorite\App\Models\FavoriteSearch;
-use Modules\Category\Models\Category;
+use Modules\Favorite\App\Models\FavoriteSeller;
 use Modules\Listing\Models\Listing;
 use Modules\Listing\Support\ListingCustomFieldSchemaBuilder;
 use Modules\Location\Models\Country;
+use Modules\Offer\Models\Offer;
+use Modules\Report\Models\Report;
+use Modules\Review\Models\Review;
 use Modules\Theme\Support\ThemeManager;
 
 class ListingController extends Controller
 {
-    public function __construct(private ThemeManager $themes)
-    {
-    }
+    public function __construct(private ThemeManager $themes) {}
 
-    public function index()
+    public function index(): View
     {
         $search = trim((string) request('search', ''));
-
-        $categoryId = request()->integer('category');
-        $categoryId = $categoryId > 0 ? $categoryId : null;
-
-        $countryId = request()->integer('country');
-        $countryId = $countryId > 0 ? $countryId : null;
-
-        $cityId = request()->integer('city');
-        $cityId = $cityId > 0 ? $cityId : null;
-
-        $sellerUserId = request()->integer('user');
-        $sellerUserId = $sellerUserId > 0 ? $sellerUserId : null;
-
+        $categoryId = $this->positiveInteger('category');
+        $countryId = $this->positiveInteger('country');
+        $cityId = $this->positiveInteger('city');
+        $sellerUserId = $this->positiveInteger('user');
         $minPriceInput = trim((string) request('min_price', ''));
         $maxPriceInput = trim((string) request('max_price', ''));
         $minPrice = is_numeric($minPriceInput) ? max((float) $minPriceInput, 0) : null;
         $maxPrice = is_numeric($maxPriceInput) ? max((float) $maxPriceInput, 0) : null;
-
-        $dateFilter = (string) request('date_filter', 'all');
-        $allowedDateFilters = ['all', 'today', 'week', 'month'];
-        if (! in_array($dateFilter, $allowedDateFilters, true)) {
-            $dateFilter = 'all';
-        }
-
-        $sort = (string) request('sort', 'smart');
-        $allowedSorts = ['smart', 'newest', 'oldest', 'price_asc', 'price_desc'];
-        if (! in_array($sort, $allowedSorts, true)) {
-            $sort = 'smart';
-        }
+        $dateFilter = $this->oneOf('date_filter', ['all', 'today', 'week', 'month']);
+        $sort = $this->oneOf('sort', ['smart', 'newest', 'oldest', 'price_asc', 'price_desc']);
 
         $locationSelection = Country::browseSelection($countryId, $cityId);
         $countryId = $locationSelection['country_id'];
@@ -71,25 +57,11 @@ class ListingController extends Controller
             'date_filter' => $dateFilter,
         ];
 
-        $allListingsTotal = Listing::query()
-            ->active()
-            ->forBrowseFilters($browseFilters)
-            ->count();
-
-        $listingsQuery = Listing::query()
-            ->active()
-            ->with('category:id,name')
-            ->forBrowseFilters([
-                ...$browseFilters,
-                'category_ids' => $listingDirectory['filterIds'],
-            ])
-            ->applyBrowseSort($sort);
-
-        $filteredListingsTotal = (clone $listingsQuery)->count();
-
-        $listings = $listingsQuery
-            ->paginate(16)
-            ->withQueryString();
+        [
+            'allTotal' => $allListingsTotal,
+            'filteredTotal' => $filteredListingsTotal,
+            'listings' => $listings,
+        ] = Listing::browse($browseFilters, $listingDirectory['filterIds'], $sort);
 
         $categories = $listingDirectory['categories'];
         $selectedCategory = $listingDirectory['selectedCategory'];
@@ -102,7 +74,7 @@ class ListingController extends Controller
             $userId = (int) auth()->id();
 
             $favoriteListingIds = auth()->user()->favoriteListingIds();
-            $conversationListingMap = Conversation::listingMapForBuyer($userId);
+            $conversationListingMap = $listings->isEmpty() ? [] : Conversation::listingMapForBuyer($userId, $listings->pluck('id')->all());
 
             $isCurrentSearchSaved = FavoriteSearch::isSavedForUser(auth()->user(), [
                 'search' => $search,
@@ -133,17 +105,13 @@ class ListingController extends Controller
         ));
     }
 
-    public function show(Listing $listing)
+    public function show(Listing $listing): View
     {
+        abort_unless($listing->isVisibleTo(auth()->user()), 404);
+
         $listing->trackViewBy(auth()->id());
 
-        $listing->loadMissing([
-            'user:id,name,email',
-            'category:id,name,parent_id,slug',
-            'category.parent:id,name,parent_id,slug',
-            'category.parent.parent:id,name,parent_id,slug',
-            'videos' => fn ($query) => $query->published()->ordered(),
-        ]);
+        $listing->loadDetail();
         $presentableCustomFields = ListingCustomFieldSchemaBuilder::presentableValues(
             $listing->category_id ? (int) $listing->category_id : null,
             $listing->custom_fields ?? [],
@@ -166,10 +134,7 @@ class ListingController extends Controller
             $isListingFavorited = in_array((int) $listing->getKey(), auth()->user()->favoriteListingIds(), true);
 
             if ($listing->user_id) {
-                $isSellerFavorited = auth()->user()
-                    ->favoriteSellers()
-                    ->whereKey($listing->user_id)
-                    ->exists();
+                $isSellerFavorited = FavoriteSeller::contains($userId, (int) $listing->user_id);
             }
 
             if ($listing->user_id && (int) $listing->user_id !== $userId) {
@@ -180,8 +145,19 @@ class ListingController extends Controller
             }
         }
 
+        $sellerId = $listing->getAttribute('user_id') === null ? null : (int) $listing->getAttribute('user_id');
+        $sellerReviewSummary = $sellerId === null
+            ? ['total' => 0, 'average' => 0.0]
+            : Review::summaryForSeller($sellerId);
+        $bestOffer = Offer::highestPendingForListing((int) $listing->getKey());
+        $reportReasons = Report::reasons();
+
         return view($this->themes->view('listing', 'show'), compact(
             'listing',
+            'sellerId',
+            'sellerReviewSummary',
+            'bestOffer',
+            'reportReasons',
             'isListingFavorited',
             'isSellerFavorited',
             'presentableCustomFields',
@@ -198,26 +174,20 @@ class ListingController extends Controller
     {
         abort_unless($listing->canRevealContactTo(auth()->user()), 403);
 
-        return response()->json($listing->contactDetailsFor(auth()->user()));
+        return response()->json($listing->contactDetails());
     }
 
-    public function create()
+    private function positiveInteger(string $key): ?int
     {
-        if (! auth()->check()) {
-            return redirect()->route('login');
-        }
+        $value = request()->integer($key);
 
-        return redirect()->route('panel.listings.create');
+        return $value > 0 ? $value : null;
     }
 
-    public function store()
+    private function oneOf(string $key, array $allowed): string
     {
-        if (! auth()->check()) {
-            return redirect()->route('login');
-        }
+        $value = (string) request($key, $allowed[0]);
 
-        return redirect()
-            ->route('panel.listings.create')
-            ->with('success', 'You were redirected to the listing creation screen.');
+        return in_array($value, $allowed, true) ? $value : $allowed[0];
     }
 }

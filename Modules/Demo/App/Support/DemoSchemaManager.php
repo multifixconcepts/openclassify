@@ -1,7 +1,10 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Modules\Demo\App\Support;
 
+use Database\Seeders\DatabaseSeeder;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
@@ -15,8 +18,6 @@ final class DemoSchemaManager
 {
     private readonly string $defaultConnection;
 
-    private readonly string $publicConnection;
-
     private readonly string $baseCachePrefix;
 
     private readonly string $basePermissionCacheKey;
@@ -24,7 +25,6 @@ final class DemoSchemaManager
     public function __construct(private readonly Application $app)
     {
         $this->defaultConnection = (string) config('database.default', 'pgsql');
-        $this->publicConnection = 'pgsql_public';
         $this->baseCachePrefix = (string) config('cache.prefix', '');
         $this->basePermissionCacheKey = (string) config('permission.cache.key', 'spatie.permission.cache');
     }
@@ -60,7 +60,7 @@ final class DemoSchemaManager
             return null;
         }
 
-        return DemoInstance::query()->activeUuid($uuid)->first();
+        return DemoInstance::findActive($uuid);
     }
 
     public function activateDemo(DemoInstance $instance): void
@@ -84,60 +84,29 @@ final class DemoSchemaManager
             return 0;
         }
 
-        $expired = DemoInstance::query()
-            ->where('expires_at', '<=', now())
-            ->get();
-
-        foreach ($expired as $instance) {
-            $this->dropSchema($instance->schema_name);
+        $count = 0;
+        foreach (DemoInstance::expired() as $instance) {
+            DemoInstance::dropSchema($instance->schema_name);
+            DemoStoragePath::purgeForUuid($instance->uuid);
             $instance->delete();
+            $count++;
         }
 
-        return $expired->count();
+        return $count;
     }
 
     public function resolveLoginUser(): User
     {
-        $user = User::query()
-            ->where('email', (string) config('demo.login_email', 'a@a.com'))
-            ->first();
-
-        if (! $user) {
-            throw new \RuntimeException('The seeded demo login user could not be found.');
-        }
-
-        return $user;
-    }
-
-    public function clearDemoArtifacts(?string $uuid): void
-    {
-        $uuid = $this->normalizeUuid($uuid);
-
-        if (! $uuid) {
-            return;
-        }
-
-        $instance = DemoInstance::query()->where('uuid', $uuid)->first();
-
-        if ($instance) {
-            $this->dropSchema($instance->schema_name);
-            $instance->delete();
-
-            return;
-        }
-
-        $this->dropSchema($this->schemaNameFor($uuid));
+        return User::demoLoginUser();
     }
 
     private function reuse(DemoInstance $instance): DemoInstance
     {
-        $instance->forceFill([
-            'expires_at' => now()->addMinutes((int) config('demo.ttl_minutes', 360)),
-        ])->save();
+        $instance->extendExpiry();
 
         $this->activateDemo($instance);
 
-        return $instance->fresh() ?? $instance;
+        return $instance;
     }
 
     private function createFresh(string $uuid): DemoInstance
@@ -147,22 +116,15 @@ final class DemoSchemaManager
         $schema = $this->schemaNameFor($uuid);
 
         try {
-            $this->createSchema($schema);
+            DemoInstance::createSchema($schema);
             $this->activateSchema($schema, $uuid);
             $this->runProvisioningCommands();
             $this->ensureLoginUserExists();
 
-            return DemoInstance::query()->updateOrCreate(
-                ['uuid' => $uuid],
-                [
-                    'schema_name' => $schema,
-                    'prepared_at' => now(),
-                    'expires_at' => now()->addMinutes((int) config('demo.ttl_minutes', 360)),
-                ],
-            );
+            return DemoInstance::prepare($uuid, $schema);
         } catch (Throwable $exception) {
-            $this->dropSchema($schema);
-            DemoInstance::query()->where('uuid', $uuid)->delete();
+            DemoInstance::dropSchema($schema);
+            DemoInstance::findByUuid($uuid)?->delete();
             $this->activatePublic();
 
             throw $exception;
@@ -180,27 +142,13 @@ final class DemoSchemaManager
             ]);
 
             Artisan::call('db:seed', [
-                '--class' => \Database\Seeders\DatabaseSeeder::class,
+                '--class' => DatabaseSeeder::class,
                 '--database' => $this->defaultConnection,
                 '--force' => true,
             ]);
         } finally {
             config(['demo.provisioning' => false]);
         }
-    }
-
-    private function createSchema(string $schema): void
-    {
-        DB::connection($this->publicConnection)->statement(
-            sprintf('CREATE SCHEMA IF NOT EXISTS %s', $this->quoteIdentifier($schema))
-        );
-    }
-
-    private function dropSchema(string $schema): void
-    {
-        DB::connection($this->publicConnection)->statement(
-            sprintf('DROP SCHEMA IF EXISTS %s CASCADE', $this->quoteIdentifier($schema))
-        );
     }
 
     private function ensureEnabled(): void
@@ -213,9 +161,7 @@ final class DemoSchemaManager
     private function ensureProvisioningCapacity(): void
     {
         $maxInstances = max(1, (int) config('demo.max_concurrent_instances', 25));
-        $activeInstances = DemoInstance::query()
-            ->where('expires_at', '>', now())
-            ->count();
+        $activeInstances = DemoInstance::activeCount();
 
         if ($activeInstances >= $maxInstances) {
             throw new \RuntimeException('Demo capacity is full. Please try again in a few minutes.');
@@ -277,14 +223,5 @@ final class DemoSchemaManager
         $suffix = str_replace('-', '', strtolower($uuid));
 
         return substr($prefix.$suffix, 0, 63);
-    }
-
-    private function quoteIdentifier(string $identifier): string
-    {
-        if (! preg_match('/^[a-z0-9_]+$/', $identifier)) {
-            throw new \RuntimeException('Invalid demo schema identifier.');
-        }
-
-        return '"'.$identifier.'"';
     }
 }

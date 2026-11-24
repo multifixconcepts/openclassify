@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Modules\User\App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
@@ -7,7 +9,6 @@ use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Password;
-use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password as PasswordRule;
 use Illuminate\View\View;
 use Modules\User\App\Models\User;
@@ -30,10 +31,7 @@ class ResetPasswordController extends Controller
         $status = Password::reset(
             $request->only('email', 'password', 'token'),
             function (User $user) use ($request): void {
-                $user->forceFill([
-                    'password' => $request->string('password')->toString(),
-                    'remember_token' => Str::random(60),
-                ])->save();
+                $user->resetPassword($request->string('password')->toString());
 
                 event(new PasswordReset($user));
             },

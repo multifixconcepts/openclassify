@@ -1,14 +1,21 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Modules\Listing\Models;
 
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
 use Modules\Category\Models\Category;
 
 class ListingCustomField extends Model
 {
+    use SoftDeletes;
+
     public const TYPE_TEXT = 'text';
 
     public const TYPE_TEXTAREA = 'textarea';
@@ -40,9 +47,19 @@ class ListingCustomField extends Model
         'is_active' => 'boolean',
     ];
 
-    public function category()
+    public function category(): BelongsTo
     {
-        return $this->belongsTo(\Modules\Category\Models\Category::class);
+        return $this->belongsTo(Category::class);
+    }
+
+    public static function hasActiveForCategory(?int $categoryId): bool
+    {
+        return static::query()->active()->forCategory($categoryId)->exists();
+    }
+
+    public static function orderedActiveForCategory(?int $categoryId): EloquentCollection
+    {
+        return static::query()->active()->forCategory($categoryId)->ordered()->get();
     }
 
     public function scopeActive(Builder $query): Builder
@@ -81,7 +98,7 @@ class ListingCustomField extends Model
     public function selectOptions(): array
     {
         $options = collect($this->options ?? [])
-            ->map(fn ($option) => is_scalar($option) ? trim((string) $option) : null)
+            ->map(fn (mixed $option): mixed => is_scalar($option) ? trim((string) $option) : null)
             ->filter(fn (?string $option): bool => filled($option))
             ->values()
             ->all();
@@ -140,7 +157,7 @@ class ListingCustomField extends Model
                 'placeholder' => $field->placeholder,
                 'help_text' => $field->help_text,
                 'options' => collect($field->options ?? [])
-                    ->map(fn ($option): string => (string) $option)
+                    ->map(fn (mixed $option): string => (string) $option)
                     ->values()
                     ->all(),
             ])

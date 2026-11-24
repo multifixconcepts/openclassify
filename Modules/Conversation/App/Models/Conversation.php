@@ -1,43 +1,49 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Modules\Conversation\App\Models;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Modules\Listing\Models\Listing;
 use Modules\User\App\Models\User;
 
 class Conversation extends Model
 {
-    use HasFactory;
+    use HasFactory, SoftDeletes;
 
     protected $fillable = ['listing_id', 'seller_id', 'buyer_id', 'last_message_at'];
 
     protected $casts = ['last_message_at' => 'datetime'];
 
-    public function listing()
+    public function listing(): BelongsTo
     {
         return $this->belongsTo(Listing::class);
     }
 
-    public function seller()
+    public function seller(): BelongsTo
     {
         return $this->belongsTo(User::class, 'seller_id');
     }
 
-    public function buyer()
+    public function buyer(): BelongsTo
     {
         return $this->belongsTo(User::class, 'buyer_id');
     }
 
-    public function messages()
+    public function messages(): HasMany
     {
         return $this->hasMany(ConversationMessage::class);
     }
 
-    public function lastMessage()
+    public function lastMessage(): HasOne
     {
         return $this->hasOne(ConversationMessage::class)
             ->latestOfMany()
@@ -72,14 +78,15 @@ class Conversation extends Model
     {
         return $query
             ->with([
-                'listing:id,title,price,currency,user_id',
+                'listing:id,title,price,currency,user_id,images',
+                'listing.media',
                 'buyer:id,name',
                 'seller:id,name',
                 'lastMessage',
                 'lastMessage.sender:id,name',
             ])
             ->withCount([
-                'messages as unread_count' => fn (Builder $messageQuery) => $messageQuery
+                'messages as unread_count' => fn (Builder $messageQuery): Builder => $messageQuery
                     ->where('sender_id', '!=', $userId)
                     ->whereNull('read_at'),
             ])
@@ -98,30 +105,18 @@ class Conversation extends Model
 
     public static function resolveSelected(EloquentCollection $conversations, ?int $conversationId): ?self
     {
-        $selectedConversationId = $conversationId;
+        $selected = ($conversationId ?? 0) > 0
+            ? $conversations->firstWhere('id', $conversationId)
+            : $conversations->first();
 
-        if (($selectedConversationId ?? 0) <= 0 && $conversations->isNotEmpty()) {
-            $selectedConversationId = (int) $conversations->first()->getKey();
-        }
-
-        if (($selectedConversationId ?? 0) <= 0) {
-            return null;
-        }
-
-        $selected = $conversations->firstWhere('id', $selectedConversationId);
-
-        if (! $selected instanceof self) {
-            return null;
-        }
-
-        return $selected;
+        return $selected instanceof self ? $selected : null;
     }
 
     public function loadThread(): void
     {
+        $this->loadMissing(['listing:id,title,price,currency,user_id,images', 'listing.media']);
         $this->load([
-            'listing:id,title,price,currency,user_id',
-            'messages' => fn ($query) => $query->with('sender:id,name')->ordered(),
+            'messages' => fn (HasMany $query): HasMany => $query->with('sender:id,name')->ordered(),
         ]);
     }
 
@@ -134,7 +129,7 @@ class Conversation extends Model
     {
         return collect([$this->buyer_id, $this->seller_id])
             ->filter()
-            ->map(fn ($id): int => (int) $id)
+            ->map(fn (int|string $id): int => (int) $id)
             ->unique()
             ->values()
             ->all();
@@ -195,7 +190,8 @@ class Conversation extends Model
     public function summaryPayloadFor(int $viewerId): array
     {
         $this->loadMissing([
-            'listing:id,title,price,currency,user_id',
+            'listing:id,title,price,currency,user_id,images',
+            'listing.media',
             'buyer:id,name,email',
             'seller:id,name,email',
             'lastMessage',
@@ -274,27 +270,12 @@ class Conversation extends Model
         return $conversation;
     }
 
-    public static function buyerListingConversationId(int $listingId, int $buyerId): ?int
-    {
-        $value = static::query()
-            ->where('listing_id', $listingId)
-            ->where('buyer_id', $buyerId)
-            ->value('id');
-
-        return is_null($value) ? null : (int) $value;
-    }
-
     public static function detailForBuyerListing(int $listingId, int $buyerId): ?self
     {
-        $conversationId = static::buyerListingConversationId($listingId, $buyerId);
-
-        if (! $conversationId) {
-            return null;
-        }
-
         $conversation = static::query()
-            ->forUser($buyerId)
-            ->find($conversationId);
+            ->where('listing_id', $listingId)
+            ->where('buyer_id', $buyerId)
+            ->first();
 
         if (! $conversation) {
             return null;
@@ -302,7 +283,7 @@ class Conversation extends Model
 
         $conversation->loadThread();
         $conversation->loadCount([
-            'messages as unread_count' => fn (Builder $query) => $query
+            'messages as unread_count' => fn (Builder $query): Builder => $query
                 ->where('sender_id', '!=', $buyerId)
                 ->whereNull('read_at'),
         ]);
@@ -316,7 +297,7 @@ class Conversation extends Model
             ->where('buyer_id', $buyerId)
             ->when($listingIds !== [], fn (Builder $query): Builder => $query->whereIn('listing_id', $listingIds))
             ->pluck('id', 'listing_id')
-            ->map(fn ($conversationId): int => (int) $conversationId)
+            ->map(fn (int|string $conversationId): int => (int) $conversationId)
             ->all();
     }
 
