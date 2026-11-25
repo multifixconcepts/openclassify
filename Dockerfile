@@ -1,30 +1,23 @@
 FROM php:8.4-fpm-alpine
 
 RUN apk add --no-cache \
-    nginx \
-    nodejs \
-    npm \
-    git \
-    curl \
-    zip \
-    unzip \
-    libpng-dev \
-    libjpeg-turbo-dev \
-    freetype-dev \
-    oniguruma-dev \
-    libxml2-dev \
-    icu-dev \
-    libzip-dev \
-    postgresql-dev \
+    nginx nodejs npm git curl zip unzip \
+    libpng-dev libjpeg-turbo-dev freetype-dev oniguruma-dev \
+    libxml2-dev icu-dev libzip-dev postgresql-dev postgresql-client \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install pdo pdo_pgsql mbstring exif pcntl bcmath gd opcache intl zip
+
+RUN apk add --no-cache --virtual .build-deps $PHPIZE_DEPS \
+    && pecl install redis \
+    && docker-php-ext-enable redis \
+    && apk del .build-deps
 
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
 WORKDIR /var/www/html
 
 COPY composer.json composer.lock* ./
-RUN composer install --no-dev --no-scripts --no-autoloader --prefer-dist
+RUN rm -f composer.lock && composer update --no-dev --no-scripts --no-autoloader --prefer-dist
 
 COPY . .
 
