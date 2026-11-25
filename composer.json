@@ -35,7 +35,7 @@
         "spatie/laravel-settings": "^3.7",
         "stechstudio/filament-impersonate": "^5.1",
         "tapp/filament-country-code-field": "^2.0",
-        "ysfkaya/filament-phone-input": "^4.1"
+        "ysfkaya/filament-phone-input": "^4.1",
         "bezhansalleh/filament-exceptions": "^4.2",
         "filament/spatie-laravel-tags-plugin": "^5.12",
         "leandrocfe/filament-apex-charts": "^5.1",
